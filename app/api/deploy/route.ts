@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
-import { getSession } from "@/lib/session-store";
-import { readBundledCode } from "@/lib/sandbox";
+import { getSession, updateSession } from "@/lib/session-store";
+import { readBundledCode, createSnapshot } from "@/lib/sandbox";
 import { generateBuildOutput, createDeployment, getDeploymentStatus } from "@/lib/vercel-deploy";
 import { addDeployment, updateDeployment, type Deployment } from "@/lib/deployments-store";
 
@@ -62,6 +62,19 @@ export async function POST(request: NextRequest) {
       pollDeploymentStatus(deployment.id);
     }
 
+    // Create snapshot to pause the sandbox after deployment
+    let snapshotId: string | undefined;
+    try {
+      snapshotId = await createSnapshot(sandboxId);
+      updateSession({
+        snapshotId,
+        status: "paused",
+      });
+    } catch (snapshotError) {
+      console.error("Failed to create snapshot after deployment:", snapshotError);
+      // Continue anyway - deployment succeeded, snapshot is optional
+    }
+
     return new Response(
       JSON.stringify({
         success: true,
@@ -73,6 +86,7 @@ export async function POST(request: NextRequest) {
           cronSchedule: deployment.cronSchedule,
           functionUrl: `${deployment.url}/api/${functionName}`,
         },
+        snapshot: snapshotId ? { id: snapshotId, message: "Sandbox paused after deployment" } : undefined,
       }),
       { status: 200, headers: { "Content-Type": "application/json" } }
     );

@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 
 interface Session {
   sandboxId: string;
-  status: "pending" | "running" | "stopping" | "stopped" | "failed";
+  status: "pending" | "running" | "stopping" | "stopped" | "paused" | "failed";
   timeout: number;
   snapshotId?: string;
   remainingTime: number;
@@ -348,6 +348,14 @@ export default function Playground() {
         addOutput("system", `Function URL: ${data.deployment.functionUrl}`);
         setIsBuilt(false);
         await fetchDeployments();
+
+        // Handle automatic snapshot after deployment
+        if (data.snapshot) {
+          setSession((s) =>
+            s ? { ...s, status: "paused", snapshotId: data.snapshot.id } : null
+          );
+          addOutput("system", `Sandbox paused. Snapshot: ${data.snapshot.id}`);
+        }
       } else {
         addOutput("stderr", `Deployment failed: ${data.error}`);
       }
@@ -398,10 +406,10 @@ export default function Playground() {
 
       if (data.success) {
         setSession((s) =>
-          s ? { ...s, status: "stopped", snapshotId: data.snapshotId } : null
+          s ? { ...s, status: "paused", snapshotId: data.snapshotId } : null
         );
         addOutput("system", `Snapshot saved: ${data.snapshotId}`);
-        addOutput("system", "Sandbox stopped. Click 'Restore' to resume.");
+        addOutput("system", "Session paused. Click 'Resume' to continue.");
       } else {
         addOutput("stderr", `Error: ${data.error}`);
       }
@@ -443,6 +451,34 @@ export default function Playground() {
     }
   };
 
+  const stopSandbox = async () => {
+    if (!session) {
+      addOutput("stderr", "No active session to stop.");
+      return;
+    }
+
+    setLoading("stop");
+    addOutput("system", "Stopping sandbox...");
+
+    try {
+      const res = await fetch("/api/stop", { method: "POST" });
+      const data = await res.json();
+
+      if (data.success) {
+        setSession(null);
+        setRemainingTime(0);
+        setIsBuilt(false);
+        addOutput("system", "Sandbox stopped. Session cleared.");
+      } else {
+        addOutput("stderr", `Error: ${data.error}`);
+      }
+    } catch (error) {
+      addOutput("stderr", `Stop failed: ${error}`);
+    } finally {
+      setLoading(null);
+    }
+  };
+
   const formatTime = (ms: number) => {
     const seconds = Math.floor(ms / 1000);
     const minutes = Math.floor(seconds / 60);
@@ -460,8 +496,18 @@ export default function Playground() {
       running: "default",
       stopping: "secondary",
       stopped: "destructive",
+      paused: "outline",
       failed: "destructive",
     };
+
+    // Special styling for paused state (yellow/warning)
+    if (session.status === "paused") {
+      return (
+        <Badge variant="outline" className="border-yellow-500 text-yellow-600 dark:text-yellow-400">
+          Paused
+        </Badge>
+      );
+    }
 
     return (
       <Badge variant={variants[session.status]}>
@@ -504,6 +550,48 @@ export default function Playground() {
             <Badge variant="secondary" className="text-xs">
               Built
             </Badge>
+          )}
+          {session?.status === "running" && (
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={saveSnapshot}
+                disabled={loading !== null}
+              >
+                {loading === "snapshot" ? "Pausing..." : "Pause"}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={stopSandbox}
+                disabled={loading !== null}
+                className="text-destructive hover:text-destructive"
+              >
+                {loading === "stop" ? "Stopping..." : "Stop"}
+              </Button>
+            </>
+          )}
+          {session?.status === "paused" && (
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={restoreSnapshot}
+                disabled={loading !== null}
+              >
+                {loading === "restore" ? "Resuming..." : "Resume"}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={stopSandbox}
+                disabled={loading !== null}
+                className="text-destructive hover:text-destructive"
+              >
+                {loading === "stop" ? "Stopping..." : "Stop"}
+              </Button>
+            </>
           )}
           {getStatusBadge()}
         </div>
@@ -551,13 +639,12 @@ export default function Playground() {
                 outputs.map((output, i) => (
                   <div
                     key={i}
-                    className={`whitespace-pre-wrap ${
-                      output.type === "stderr"
-                        ? "text-destructive"
-                        : output.type === "system"
+                    className={`whitespace-pre-wrap ${output.type === "stderr"
+                      ? "text-destructive"
+                      : output.type === "system"
                         ? "text-primary"
                         : "text-foreground"
-                    }`}
+                      }`}
                   >
                     {output.type === "system" ? `> ${output.content}` : output.content}
                   </div>
@@ -685,7 +772,7 @@ export default function Playground() {
           onClick={saveSnapshot}
           disabled={loading !== null || session?.status !== "running"}
         >
-          {loading === "snapshot" ? "Saving..." : "Save Env"}
+          {loading === "snapshot" ? "Saving..." : "Pause"}
         </Button>
 
         <Button
@@ -693,7 +780,15 @@ export default function Playground() {
           onClick={restoreSnapshot}
           disabled={loading !== null || !session?.snapshotId}
         >
-          {loading === "restore" ? "Restoring..." : "Restore"}
+          {loading === "restore" ? "Resuming..." : "Resume"}
+        </Button>
+
+        <Button
+          variant="destructive"
+          onClick={stopSandbox}
+          disabled={loading !== null || !session || session.status === "stopped"}
+        >
+          {loading === "stop" ? "Stopping..." : "Stop"}
         </Button>
 
         {remainingTime > 0 && remainingTime < 60000 && session?.status === "running" && (

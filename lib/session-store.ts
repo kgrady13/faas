@@ -1,6 +1,6 @@
 export interface Session {
   sandboxId: string;
-  status: 'pending' | 'running' | 'stopping' | 'stopped' | 'failed';
+  status: 'pending' | 'running' | 'stopping' | 'stopped' | 'paused' | 'failed';
   timeout: number;
   snapshotId?: string;
   createdAt: Date;

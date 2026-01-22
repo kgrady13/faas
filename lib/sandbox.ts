@@ -147,30 +147,37 @@ export function setActiveSandbox(sandbox: Sandbox | null): void {
 
 /**
  * Install esbuild in the sandbox if not already installed
+ * Uses /tmp/build-tools to avoid polluting user's working directory
  */
 export async function installEsbuild(sandboxId: string): Promise<{ success: boolean; logs: string[] }> {
   const sandbox = await getOrReconnectSandbox(sandboxId);
   const logs: string[] = [];
 
-  // Check if esbuild is already installed by checking node_modules
-  const checkResult = await sandbox.runCommand('ls', ['/vercel/sandbox/node_modules/esbuild']);
+  // Use /tmp/build-tools to keep build tools separate from user code
+  const buildToolsDir = '/tmp/build-tools';
+
+  // Check if esbuild is already installed
+  const checkResult = await sandbox.runCommand('ls', [`${buildToolsDir}/node_modules/esbuild`]);
 
   if (checkResult.exitCode === 0) {
     logs.push('esbuild already installed');
     return { success: true, logs };
   }
 
-  // Initialize npm if needed (run from /vercel/sandbox using shell)
-  const initResult = await sandbox.runCommand('sh', ['-c', 'cd /vercel/sandbox && npm init -y']);
+  // Create build tools directory
+  await sandbox.runCommand('mkdir', ['-p', buildToolsDir]);
+
+  // Initialize npm in the build tools directory
+  const initResult = await sandbox.runCommand('sh', ['-c', `cd ${buildToolsDir} && npm init -y`]);
 
   if (initResult.exitCode !== 0) {
     const stderr = await initResult.stderr();
     logs.push(`npm init failed: ${stderr}`);
   }
 
-  // Install esbuild
+  // Install esbuild in the build tools directory
   logs.push('Installing esbuild...');
-  const installResult = await sandbox.runCommand('sh', ['-c', 'cd /vercel/sandbox && npm install esbuild']);
+  const installResult = await sandbox.runCommand('sh', ['-c', `cd ${buildToolsDir} && npm install esbuild`]);
 
   const stdout = await installResult.stdout();
   const stderr = await installResult.stderr();
@@ -218,14 +225,14 @@ export async function* buildCode(
     return;
   }
 
-  // Run esbuild to bundle the code
+  // Run esbuild to bundle the code (using esbuild from /tmp/build-tools)
   yield { type: 'log', data: 'Running esbuild...' };
 
   const buildCommand = await sandbox.runCommand({
     cmd: 'sh',
     args: [
       '-c',
-      'cd /vercel/sandbox && npx esbuild /tmp/src/handler.ts --bundle --platform=node --target=node22 --format=cjs --outfile=/tmp/dist/index.js',
+      '/tmp/build-tools/node_modules/.bin/esbuild /tmp/src/handler.ts --bundle --platform=node --target=node22 --format=cjs --outfile=/tmp/dist/index.js',
     ],
     detached: true,
   });

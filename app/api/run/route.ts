@@ -29,6 +29,14 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // Check if session is paused
+  if (session.status === "paused") {
+    return new Response(
+      JSON.stringify({ success: false, error: "Session is paused. Click 'Resume' to continue." }),
+      { status: 400, headers: { "Content-Type": "application/json" } }
+    );
+  }
+
   const sandboxId = session.sandboxId;
 
   // Create a readable stream for SSE

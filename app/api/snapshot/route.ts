@@ -19,7 +19,7 @@ export async function POST() {
     // Update session with snapshot info
     updateSession({
       snapshotId,
-      status: "stopped",
+      status: "paused",
     });
 
     return NextResponse.json({
