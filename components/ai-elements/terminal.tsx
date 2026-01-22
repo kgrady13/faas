@@ -1,6 +1,5 @@
 "use client";
 
-
 import Ansi from "ansi-to-react";
 import { CheckIcon, CopyIcon, TerminalIcon, Trash2Icon } from "lucide-react";
 import {
@@ -12,6 +11,7 @@ import {
     useRef,
     useState,
 } from "react";
+import { Shimmer } from "@/components/ai-elements/shimmer";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 
@@ -125,7 +125,10 @@ export const TerminalStatus = ({
             className={cn("flex items-center gap-2 text-xs text-zinc-400", className)}
             {...props}
         >
-            {children ?? <p className="animate-pulse">Streaming...</p>}
+            {children ?? <Shimmer>
+                Loading...
+            </Shimmer>
+            }
         </div>
     );
 };
