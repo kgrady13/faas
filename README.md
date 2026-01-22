@@ -22,13 +22,16 @@ A white-labeled FaaS (Function-as-a-Service) platform that uses Vercel Sandbox f
 │  [New Session] [Run] [Build] [Deploy] [Save Env] [Restore]      │
 └─────────────────────────┬───────────────────────────────────────┘
                           │
-        ┌─────────────────┼─────────────────────┐
-        ▼                 ▼                     ▼
-┌───────────────┐  ┌───────────────┐     ┌───────────────────┐
-│   Sandbox     │  │  Build API    │     │  Vercel Deploy    │
-│  (Dev/Test)   │──│  (esbuild)    │────▶│  (Build Output)   │
-│  Node.js 24   │  │  bundle code  │     │  Fluid Compute    │
-└───────────────┘  └───────────────┘     └───────────────────┘
+        ┌─────────────────┴─────────────────┐
+        ▼                                   ▼
+┌─────────────────────────────┐     ┌───────────────────┐
+│         Sandbox             │     │  Vercel Deploy    │
+│        Node.js 24           │     │  (Build Output)   │
+│  ┌─────────┐  ┌──────────┐  │────▶│  Fluid Compute    │
+│  │Dev/Test │  │  Build   │  │     └───────────────────┘
+│  │  (Run)  │  │ (esbuild)│  │
+│  └─────────┘  └──────────┘  │
+└─────────────────────────────┘
 ```
 
 ## User Workflow
