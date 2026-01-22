@@ -170,7 +170,7 @@ export default function Playground() {
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [session?.status]);
+  }, [session]);
 
   const createSession = async () => {
     setLoading("create");
@@ -548,7 +548,7 @@ export default function Playground() {
         <div className="flex items-center gap-3">
           {session?.snapshotId && (
             <span className="text-xs text-muted-foreground">
-              Snapshot: {session.snapshotId.slice(0, 12)}...
+              {session.snapshotId.slice(0, 12)}...
             </span>
           )}
           {session?.status === "running" && (
@@ -780,7 +780,7 @@ export default function Playground() {
                 <ComboboxItem
                   key={preset.value || "none"}
                   value={preset.value}
-                  className="whitespace-nowrap pr-2 text-xs aria-selected:bg-foreground aria-selected:text-background [&_[data-slot=combobox-item-indicator]]:hidden"
+                  className="whitespace-nowrap pr-2 text-xs aria-selected:bg-foreground aria-selected:text-background **:data-[slot=combobox-item-indicator]:hidden"
                 >
                   {preset.label}
                 </ComboboxItem>
