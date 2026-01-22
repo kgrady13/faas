@@ -795,7 +795,6 @@ export default function Playground() {
                 <ComboboxItem
                   key={preset.value || "none"}
                   value={preset.value}
-                  label={preset.label}
                   className="whitespace-nowrap pr-2 text-xs aria-selected:bg-foreground aria-selected:text-background [&_[data-slot=combobox-item-indicator]]:hidden"
                 >
                   {preset.label}
