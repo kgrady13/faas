@@ -1,12 +1,19 @@
 import { NextRequest } from "next/server";
 import { getSession, updateSession } from "@/lib/session-store";
-import { readBundledCode, createSnapshot } from "@/lib/sandbox";
+import { buildCode, createSnapshot } from "@/lib/sandbox";
 import { generateBuildOutput, createDeployment, getDeploymentStatus } from "@/lib/vercel-deploy";
 import { addDeployment, updateDeployment, type Deployment } from "@/lib/deployments-store";
 
 export async function POST(request: NextRequest) {
   const body = await request.json();
-  const { functionName = "handler", cronSchedule } = body;
+  const { code, functionName = "handler", cronSchedule } = body;
+
+  if (!code || typeof code !== "string") {
+    return new Response(
+      JSON.stringify({ success: false, error: "Code is required" }),
+      { status: 400, headers: { "Content-Type": "application/json" } }
+    );
+  }
 
   const session = getSession();
 
@@ -25,78 +32,136 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // Check if session is paused
+  if (session.status === "paused") {
+    return new Response(
+      JSON.stringify({ success: false, error: "Session is paused. Click 'Resume' to continue." }),
+      { status: 400, headers: { "Content-Type": "application/json" } }
+    );
+  }
+
   const sandboxId = session.sandboxId;
 
-  try {
-    // Read the bundled code from the sandbox
-    const bundledCode = await readBundledCode(sandboxId);
+  // Create a readable stream for SSE
+  const stream = new ReadableStream({
+    async start(controller) {
+      const encoder = new TextEncoder();
 
-    // Generate Build Output API files
-    const files = generateBuildOutput(bundledCode, functionName, cronSchedule);
+      const emit = (type: string, data: unknown) => {
+        const sseMessage = `data: ${JSON.stringify({ type, data })}\n\n`;
+        controller.enqueue(encoder.encode(sseMessage));
+      };
 
-    // Create deployment on Vercel
-    const deploymentResult = await createDeployment({
-      files,
-      functionName,
-      cronSchedule,
-    });
+      try {
+        // Phase 1: Build
+        emit("phase", "build");
 
-    // Store deployment in our local store
-    const deployment: Deployment = {
-      id: deploymentResult.id,
-      url: deploymentResult.url,
-      functionName,
-      createdAt: new Date(),
-      status: deploymentResult.readyState === 'READY' ? 'ready' :
-              deploymentResult.readyState === 'ERROR' ? 'error' :
-              deploymentResult.readyState === 'QUEUED' ? 'queued' : 'building',
-      cronSchedule,
-      errorMessage: deploymentResult.errorMessage,
-    };
+        let buildSucceeded = false;
 
-    addDeployment(deployment);
+        for await (const event of buildCode(code, sandboxId)) {
+          if (event.type === "log") {
+            emit("log", event.data);
+          } else if (event.type === "error") {
+            emit("error", event.data);
+          } else if (event.type === "done") {
+            buildSucceeded = true;
+            emit("build_done", event.data);
+          }
+        }
 
-    // If deployment is not ready yet, poll for status
-    if (deployment.status === 'building' || deployment.status === 'queued') {
-      // Poll in the background (non-blocking)
-      pollDeploymentStatus(deployment.id);
-    }
+        if (!buildSucceeded) {
+          emit("error", "Build failed");
+          return;
+        }
 
-    // Create snapshot to pause the sandbox after deployment
-    let snapshotId: string | undefined;
-    try {
-      snapshotId = await createSnapshot(sandboxId);
-      updateSession({
-        snapshotId,
-        status: "paused",
-      });
-    } catch (snapshotError) {
-      console.error("Failed to create snapshot after deployment:", snapshotError);
-      // Continue anyway - deployment succeeded, snapshot is optional
-    }
+        // Read the bundled code
+        const { getOrReconnectSandbox } = await import("@/lib/sandbox");
+        const sandbox = await getOrReconnectSandbox(sandboxId);
+        const result = await sandbox.runCommand("cat", ["/tmp/dist/index.js"]);
+        if (result.exitCode !== 0) {
+          emit("error", "Failed to read bundled code");
+          return;
+        }
+        const bundledCode = await result.stdout();
 
-    return new Response(
-      JSON.stringify({
-        success: true,
-        deployment: {
+        // Phase 2: Deploy
+        emit("phase", "deploy");
+        emit("log", "Creating Vercel deployment...");
+
+        // Generate Build Output API files
+        const files = generateBuildOutput(bundledCode, functionName, cronSchedule);
+
+        // Create deployment on Vercel
+        const deploymentResult = await createDeployment({
+          files,
+          functionName,
+          cronSchedule,
+        });
+
+        // Store deployment in our local store
+        const deployment: Deployment = {
+          id: deploymentResult.id,
+          url: deploymentResult.url,
+          functionName,
+          createdAt: new Date(),
+          status: deploymentResult.readyState === "READY" ? "ready" :
+                  deploymentResult.readyState === "ERROR" ? "error" :
+                  deploymentResult.readyState === "QUEUED" ? "queued" : "building",
+          cronSchedule,
+          errorMessage: deploymentResult.errorMessage,
+        };
+
+        addDeployment(deployment);
+
+        // If deployment is not ready yet, poll for status
+        if (deployment.status === "building" || deployment.status === "queued") {
+          pollDeploymentStatus(deployment.id);
+        }
+
+        emit("log", `Deployment started: ${deployment.id}`);
+        emit("deploy_done", {
           id: deployment.id,
           url: deployment.url,
           functionName: deployment.functionName,
           status: deployment.status,
           cronSchedule: deployment.cronSchedule,
           functionUrl: `${deployment.url}/api/${functionName}`,
-        },
-        snapshot: snapshotId ? { id: snapshotId, message: "Sandbox paused after deployment" } : undefined,
-      }),
-      { status: 200, headers: { "Content-Type": "application/json" } }
-    );
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : "Deployment failed";
-    return new Response(
-      JSON.stringify({ success: false, error: errorMessage }),
-      { status: 500, headers: { "Content-Type": "application/json" } }
-    );
-  }
+        });
+
+        // Create snapshot to pause the sandbox after deployment
+        try {
+          const snapshotId = await createSnapshot(sandboxId);
+          updateSession({
+            snapshotId,
+            status: "paused",
+          });
+          emit("snapshot", { id: snapshotId });
+          emit("log", `Sandbox paused. Snapshot: ${snapshotId}`);
+        } catch (snapshotError) {
+          console.error("Failed to create snapshot after deployment:", snapshotError);
+          emit("log", "Warning: Failed to create snapshot after deployment");
+        }
+
+        // Extend timeout on successful deploy
+        updateSession({
+          timeout: Date.now() + 2 * 60 * 1000,
+        });
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : "Deployment failed";
+        emit("error", errorMessage);
+      } finally {
+        controller.close();
+      }
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+    },
+  });
 }
 
 /**

@@ -57,7 +57,7 @@ const CRON_PRESETS = [
 ];
 
 const DEFAULT_CODE = `// Web Standard Function Handler
-// Click "Run" to test, "Build" + "Deploy" for Vercel Fluid Compute
+// Click "Run" to test, "Deploy" for Vercel Fluid Compute
 
 console.log("Hello World");
 
@@ -98,7 +98,6 @@ export default function Playground() {
   const [loading, setLoading] = useState<string | null>(null);
   const [remainingTime, setRemainingTime] = useState<number>(0);
   const [deployments, setDeployments] = useState<Deployment[]>([]);
-  const [isBuilt, setIsBuilt] = useState(false);
   const [cronSchedule, setCronSchedule] = useState("");
   const outputRef = useRef<HTMLDivElement>(null);
 
@@ -176,7 +175,6 @@ export default function Playground() {
   const createSession = async () => {
     setLoading("create");
     setOutputs([]);
-    setIsBuilt(false);
     addOutput("system", "Creating new sandbox...");
 
     try {
@@ -276,21 +274,24 @@ export default function Playground() {
     }
   };
 
-  const buildCode = async () => {
+  const deployCode = async () => {
     if (!session || session.status !== "running") {
       addOutput("stderr", "No active session. Click 'New Session' first.");
       return;
     }
 
-    setLoading("build");
-    setIsBuilt(false);
-    addOutput("system", "Building code with esbuild...");
+    setLoading("deploy");
+    addOutput("system", "Building and deploying to Vercel Fluid Compute...");
 
     try {
-      const res = await fetch("/api/build", {
+      const res = await fetch("/api/deploy", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code }),
+        body: JSON.stringify({
+          code,
+          functionName: "handler",
+          cronSchedule: cronSchedule || undefined,
+        }),
       });
 
       // Check if response is SSE stream or JSON error
@@ -310,7 +311,6 @@ export default function Playground() {
 
       const decoder = new TextDecoder();
       let buffer = "";
-      let buildSucceeded = false;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -327,65 +327,27 @@ export default function Playground() {
             try {
               const event = JSON.parse(jsonStr);
 
-              if (event.type === "log") {
+              if (event.type === "phase") {
+                addOutput("system", `--- ${event.data.toUpperCase()} PHASE ---`);
+              } else if (event.type === "log") {
                 addOutput("stdout", event.data);
               } else if (event.type === "error") {
                 addOutput("stderr", event.data);
-              } else if (event.type === "done") {
-                buildSucceeded = true;
-                addOutput("system", "Build successful! Ready to deploy.");
+              } else if (event.type === "build_done") {
+                addOutput("system", "Build successful!");
+              } else if (event.type === "deploy_done") {
+                addOutput("system", `Function URL: ${event.data.functionUrl}`);
+                await fetchDeployments();
+              } else if (event.type === "snapshot") {
+                setSession((s) =>
+                  s ? { ...s, status: "paused", snapshotId: event.data.id } : null
+                );
               }
             } catch {
               // Ignore JSON parse errors
             }
           }
         }
-      }
-
-      setIsBuilt(buildSucceeded);
-    } catch (error) {
-      addOutput("stderr", `Build failed: ${error}`);
-    } finally {
-      setLoading(null);
-    }
-  };
-
-  const deployCode = async () => {
-    if (!isBuilt) {
-      addOutput("stderr", "Please build the code first.");
-      return;
-    }
-
-    setLoading("deploy");
-    addOutput("system", "Deploying to Vercel Fluid Compute...");
-
-    try {
-      const res = await fetch("/api/deploy", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          functionName: "handler",
-          cronSchedule: cronSchedule || undefined,
-        }),
-      });
-
-      const data = await res.json();
-
-      if (data.success) {
-        addOutput("system", `Deployment started: ${data.deployment.id}`);
-        addOutput("system", `Function URL: ${data.deployment.functionUrl}`);
-        setIsBuilt(false);
-        await fetchDeployments();
-
-        // Handle automatic snapshot after deployment
-        if (data.snapshot) {
-          setSession((s) =>
-            s ? { ...s, status: "paused", snapshotId: data.snapshot.id } : null
-          );
-          addOutput("system", `Sandbox paused. Snapshot: ${data.snapshot.id}`);
-        }
-      } else {
-        addOutput("stderr", `Deployment failed: ${data.error}`);
       }
     } catch (error) {
       addOutput("stderr", `Deployment failed: ${error}`);
@@ -495,7 +457,6 @@ export default function Playground() {
       if (data.success) {
         setSession(null);
         setRemainingTime(0);
-        setIsBuilt(false);
         addOutput("system", "Sandbox stopped. Session cleared.");
       } else {
         addOutput("stderr", `Error: ${data.error}`);
@@ -518,7 +479,6 @@ export default function Playground() {
         trailingComma: "es5",
       });
       setCode(formatted);
-      setIsBuilt(false);
     } catch {
       addOutput("stderr", "Failed to format code - check for syntax errors");
     }
@@ -591,11 +551,6 @@ export default function Playground() {
               Snapshot: {session.snapshotId.slice(0, 12)}...
             </span>
           )}
-          {isBuilt && (
-            <Badge variant="secondary" className="text-xs">
-              Built
-            </Badge>
-          )}
           {session?.status === "running" && (
             <>
               <Button
@@ -660,10 +615,7 @@ export default function Playground() {
             height="100%"
             defaultLanguage="typescript"
             value={code}
-            onChange={(value) => {
-              setCode(value || "");
-              setIsBuilt(false);
-            }}
+            onChange={(value) => setCode(value || "")}
             theme="light"
             options={{
               minimap: { enabled: false },
@@ -810,16 +762,8 @@ export default function Playground() {
         <div className="w-px h-6 bg-border mx-1" />
 
         <Button
-          variant="secondary"
-          onClick={buildCode}
-          disabled={loading !== null || session?.status !== "running"}
-        >
-          {loading === "build" ? "Building..." : "Build"}
-        </Button>
-
-        <Button
           onClick={deployCode}
-          disabled={loading !== null || !isBuilt}
+          disabled={loading !== null || session?.status !== "running"}
         >
           {loading === "deploy" ? "Deploying..." : "Deploy"}
         </Button>
