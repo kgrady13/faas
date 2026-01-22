@@ -1,6 +1,9 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import * as prettier from "prettier/standalone";
+import * as prettierPluginTypescript from "prettier/plugins/typescript";
+import * as prettierPluginEstree from "prettier/plugins/estree";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
@@ -504,6 +507,23 @@ export default function Playground() {
     }
   };
 
+  const formatCode = async () => {
+    try {
+      const formatted = await prettier.format(code, {
+        parser: "typescript",
+        plugins: [prettierPluginTypescript, prettierPluginEstree],
+        semi: true,
+        singleQuote: false,
+        tabWidth: 2,
+        trailingComma: "es5",
+      });
+      setCode(formatted);
+      setIsBuilt(false);
+    } catch {
+      addOutput("stderr", "Failed to format code - check for syntax errors");
+    }
+  };
+
   const formatTime = (ms: number) => {
     const seconds = Math.floor(ms / 1000);
     const minutes = Math.floor(seconds / 60);
@@ -626,8 +646,15 @@ export default function Playground() {
       <main className="flex-1 flex min-h-0">
         {/* Code Editor */}
         <div className="w-1/2 border-r border-border flex flex-col min-h-0">
-          <div className="shrink-0 px-3 py-2 border-b border-border text-sm text-muted-foreground">
-            Code Editor
+          <div className="shrink-0 px-3 py-2 border-b border-border text-sm text-muted-foreground flex items-center justify-between">
+            <span>Code Editor</span>
+            <Button
+              variant="ghost"
+              size="xs"
+              onClick={formatCode}
+            >
+              Format
+            </Button>
           </div>
           <Textarea
             value={code}
