@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
 
 interface Session {
   sandboxId: string;
@@ -20,31 +21,46 @@ interface Output {
   timestamp: Date;
 }
 
-const DEFAULT_CODE = `// Sandbox FaaS Demo - Run Node.js code in isolated microVMs
+interface Deployment {
+  id: string;
+  url: string;
+  functionName: string;
+  functionUrl: string;
+  status: "building" | "queued" | "ready" | "error" | "canceled";
+  cronSchedule?: string;
+  createdAt: string;
+  errorMessage?: string;
+}
 
-async function countdown(from = 5) {
-  console.log(\`Starting countdown from \${from}...\`);
+const DEFAULT_CODE = `// Web Standard Function Handler
+// Click "Run" to test, "Build" + "Deploy" for Vercel Fluid Compute
 
-  for (let i = from; i > 0; i--) {
-    console.log(\`  \${i}...\`);
-    await new Promise(r => setTimeout(r, 200));
+export default async function handler(req: Request): Promise<Response> {
+  // Use base URL for relative paths (Vercel passes relative URLs)
+  const url = new URL(req.url, "http://localhost");
+
+  if (req.method === "GET") {
+    return new Response(JSON.stringify({
+      message: "Hello from Vercel Fluid Compute!",
+      timestamp: new Date().toISOString(),
+      path: url.pathname,
+    }), {
+      headers: { "Content-Type": "application/json" }
+    });
   }
 
-  console.log('Liftoff!');
-  return { counted: from, message: 'Countdown complete!' };
-}
+  if (req.method === "POST") {
+    const body = await req.json();
+    return new Response(JSON.stringify({
+      received: body,
+      processed: true,
+    }), {
+      headers: { "Content-Type": "application/json" }
+    });
+  }
 
-async function fetchData(url = 'https://jsonplaceholder.typicode.com/posts/1') {
-  console.log(\`Fetching: \${url}\`);
-  const response = await fetch(url);
-  const data = await response.json();
-  console.log('Response:', JSON.stringify(data, null, 2));
-  return { status: response.status, data };
+  return new Response("Method not allowed", { status: 405 });
 }
-
-// Run the demos
-await countdown(5);
-await fetchData();
 `;
 
 export default function Playground() {
@@ -53,6 +69,9 @@ export default function Playground() {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState<string | null>(null);
   const [remainingTime, setRemainingTime] = useState<number>(0);
+  const [deployments, setDeployments] = useState<Deployment[]>([]);
+  const [isBuilt, setIsBuilt] = useState(false);
+  const [cronSchedule, setCronSchedule] = useState("");
   const outputRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll to bottom when new output arrives
@@ -79,9 +98,34 @@ export default function Playground() {
     }
   }, []);
 
+  const fetchDeployments = useCallback(async () => {
+    try {
+      const res = await fetch("/api/deployments");
+      const data = await res.json();
+      if (data.success) {
+        setDeployments(data.deployments);
+      }
+    } catch {
+      // Ignore errors
+    }
+  }, []);
+
   useEffect(() => {
     fetchSession();
-  }, [fetchSession]);
+    fetchDeployments();
+  }, [fetchSession, fetchDeployments]);
+
+  // Poll deployments for status updates
+  useEffect(() => {
+    const hasPendingDeployments = deployments.some(
+      d => d.status === "building" || d.status === "queued"
+    );
+
+    if (!hasPendingDeployments) return;
+
+    const interval = setInterval(fetchDeployments, 5000);
+    return () => clearInterval(interval);
+  }, [deployments, fetchDeployments]);
 
   // Update remaining time countdown
   useEffect(() => {
@@ -104,6 +148,7 @@ export default function Playground() {
   const createSession = async () => {
     setLoading("create");
     setOutputs([]);
+    setIsBuilt(false);
     addOutput("system", "Creating new sandbox...");
 
     try {
@@ -203,6 +248,141 @@ export default function Playground() {
     }
   };
 
+  const buildCode = async () => {
+    if (!session || session.status !== "running") {
+      addOutput("stderr", "No active session. Click 'New Session' first.");
+      return;
+    }
+
+    setLoading("build");
+    setIsBuilt(false);
+    addOutput("system", "Building code with esbuild...");
+
+    try {
+      const res = await fetch("/api/build", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+
+      // Check if response is SSE stream or JSON error
+      const contentType = res.headers.get("content-type");
+      if (contentType?.includes("application/json")) {
+        const data = await res.json();
+        addOutput("stderr", `Error: ${data.error}`);
+        return;
+      }
+
+      // Read SSE stream
+      const reader = res.body?.getReader();
+      if (!reader) {
+        addOutput("stderr", "Failed to read response stream");
+        return;
+      }
+
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let buildSucceeded = false;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+
+        const lines = buffer.split("\n\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            const jsonStr = line.slice(6);
+            try {
+              const event = JSON.parse(jsonStr);
+
+              if (event.type === "log") {
+                addOutput("stdout", event.data);
+              } else if (event.type === "error") {
+                addOutput("stderr", event.data);
+              } else if (event.type === "done") {
+                buildSucceeded = true;
+                addOutput("system", "Build successful! Ready to deploy.");
+              }
+            } catch {
+              // Ignore JSON parse errors
+            }
+          }
+        }
+      }
+
+      setIsBuilt(buildSucceeded);
+    } catch (error) {
+      addOutput("stderr", `Build failed: ${error}`);
+    } finally {
+      setLoading(null);
+    }
+  };
+
+  const deployCode = async () => {
+    if (!isBuilt) {
+      addOutput("stderr", "Please build the code first.");
+      return;
+    }
+
+    setLoading("deploy");
+    addOutput("system", "Deploying to Vercel Fluid Compute...");
+
+    try {
+      const res = await fetch("/api/deploy", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          functionName: "handler",
+          cronSchedule: cronSchedule || undefined,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (data.success) {
+        addOutput("system", `Deployment started: ${data.deployment.id}`);
+        addOutput("system", `Function URL: ${data.deployment.functionUrl}`);
+        setIsBuilt(false);
+        await fetchDeployments();
+      } else {
+        addOutput("stderr", `Deployment failed: ${data.error}`);
+      }
+    } catch (error) {
+      addOutput("stderr", `Deployment failed: ${error}`);
+    } finally {
+      setLoading(null);
+    }
+  };
+
+  const deleteDeployment = async (id: string) => {
+    try {
+      const res = await fetch(`/api/deployments/${id}`, { method: "DELETE" });
+      const data = await res.json();
+
+      if (data.success) {
+        addOutput("system", `Deployment ${id.slice(0, 8)}... deleted`);
+        await fetchDeployments();
+      } else {
+        addOutput("stderr", `Delete failed: ${data.error}`);
+      }
+    } catch (error) {
+      addOutput("stderr", `Delete failed: ${error}`);
+    }
+  };
+
+  const copyToClipboard = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      addOutput("system", "URL copied to clipboard");
+    } catch {
+      addOutput("stderr", "Failed to copy to clipboard");
+    }
+  };
+
   const saveSnapshot = async () => {
     if (!session || session.status !== "running") {
       addOutput("stderr", "No active session to snapshot.");
@@ -293,6 +473,22 @@ export default function Playground() {
     );
   };
 
+  const getDeploymentStatusBadge = (status: Deployment["status"]) => {
+    const variants: Record<Deployment["status"], "default" | "secondary" | "destructive" | "outline"> = {
+      ready: "default",
+      building: "secondary",
+      queued: "secondary",
+      error: "destructive",
+      canceled: "outline",
+    };
+
+    return (
+      <Badge variant={variants[status]} className="text-xs">
+        {status}
+      </Badge>
+    );
+  };
+
   return (
     <div className="h-screen flex flex-col overflow-hidden bg-background text-foreground">
       {/* Header */}
@@ -303,6 +499,11 @@ export default function Playground() {
             <span className="text-xs text-muted-foreground">
               Snapshot: {session.snapshotId.slice(0, 12)}...
             </span>
+          )}
+          {isBuilt && (
+            <Badge variant="secondary" className="text-xs">
+              Built
+            </Badge>
           )}
           {getStatusBadge()}
         </div>
@@ -317,46 +518,121 @@ export default function Playground() {
           </div>
           <Textarea
             value={code}
-            onChange={(e) => setCode(e.target.value)}
+            onChange={(e) => {
+              setCode(e.target.value);
+              setIsBuilt(false);
+            }}
             className="flex-1 rounded-none border-0 shadow-none resize-none focus-visible:ring-0 font-mono text-sm min-h-0 overflow-auto"
             placeholder="Write your Node.js code here..."
             spellCheck={false}
           />
         </div>
 
-        {/* Output Panel */}
+        {/* Output and Deployments Panel */}
         <div className="w-1/2 flex flex-col min-h-0">
-          <div className="shrink-0 px-3 py-2 border-b border-border text-sm text-muted-foreground flex items-center justify-between">
-            <span>Output</span>
-            <Button
-              variant="ghost"
-              size="xs"
-              onClick={() => setOutputs([])}
-            >
-              Clear
-            </Button>
+          {/* Output Panel */}
+          <div className="flex-1 flex flex-col min-h-0 border-b border-border">
+            <div className="shrink-0 px-3 py-2 border-b border-border text-sm text-muted-foreground flex items-center justify-between">
+              <span>Output</span>
+              <Button
+                variant="ghost"
+                size="xs"
+                onClick={() => setOutputs([])}
+              >
+                Clear
+              </Button>
+            </div>
+            <div ref={outputRef} className="flex-1 min-h-0 p-4 font-mono text-sm overflow-auto bg-muted/30">
+              {outputs.length === 0 ? (
+                <span className="text-muted-foreground">
+                  Output will appear here...
+                </span>
+              ) : (
+                outputs.map((output, i) => (
+                  <div
+                    key={i}
+                    className={`whitespace-pre-wrap ${
+                      output.type === "stderr"
+                        ? "text-destructive"
+                        : output.type === "system"
+                        ? "text-primary"
+                        : "text-foreground"
+                    }`}
+                  >
+                    {output.type === "system" ? `> ${output.content}` : output.content}
+                  </div>
+                ))
+              )}
+            </div>
           </div>
-          <div ref={outputRef} className="flex-1 min-h-0 p-4 font-mono text-sm overflow-auto bg-muted/30">
-            {outputs.length === 0 ? (
-              <span className="text-muted-foreground">
-                Output will appear here...
-              </span>
-            ) : (
-              outputs.map((output, i) => (
-                <div
-                  key={i}
-                  className={`whitespace-pre-wrap ${
-                    output.type === "stderr"
-                      ? "text-destructive"
-                      : output.type === "system"
-                      ? "text-primary"
-                      : "text-foreground"
-                  }`}
-                >
-                  {output.type === "system" ? `> ${output.content}` : output.content}
+
+          {/* Deployments Panel */}
+          <div className="h-48 shrink-0 flex flex-col">
+            <div className="shrink-0 px-3 py-2 border-b border-border text-sm text-muted-foreground flex items-center justify-between">
+              <span>Deployed Functions ({deployments.length})</span>
+              <Button
+                variant="ghost"
+                size="xs"
+                onClick={fetchDeployments}
+              >
+                Refresh
+              </Button>
+            </div>
+            <div className="flex-1 overflow-auto">
+              {deployments.length === 0 ? (
+                <div className="p-4 text-sm text-muted-foreground">
+                  No deployments yet. Build and deploy your code to see them here.
                 </div>
-              ))
-            )}
+              ) : (
+                <div className="divide-y divide-border">
+                  {deployments.map((deployment) => (
+                    <div key={deployment.id} className="p-3 flex items-center gap-3 text-sm">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium truncate">
+                            {deployment.functionName}
+                          </span>
+                          {getDeploymentStatusBadge(deployment.status)}
+                          {deployment.cronSchedule && (
+                            <span className="text-xs text-muted-foreground">
+                              cron: {deployment.cronSchedule}
+                            </span>
+                          )}
+                        </div>
+                        {deployment.status === "ready" && (
+                          <div className="text-xs text-muted-foreground truncate mt-0.5">
+                            {deployment.functionUrl}
+                          </div>
+                        )}
+                        {deployment.errorMessage && (
+                          <div className="text-xs text-destructive mt-0.5">
+                            {deployment.errorMessage}
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1">
+                        {deployment.status === "ready" && (
+                          <Button
+                            variant="ghost"
+                            size="xs"
+                            onClick={() => copyToClipboard(deployment.functionUrl)}
+                          >
+                            Copy
+                          </Button>
+                        )}
+                        <Button
+                          variant="ghost"
+                          size="xs"
+                          onClick={() => deleteDeployment(deployment.id)}
+                        >
+                          Delete
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </main>
@@ -378,12 +654,38 @@ export default function Playground() {
           {loading === "run" ? "Running..." : "Run"}
         </Button>
 
+        <div className="w-px h-6 bg-border mx-1" />
+
+        <Button
+          variant="secondary"
+          onClick={buildCode}
+          disabled={loading !== null || session?.status !== "running"}
+        >
+          {loading === "build" ? "Building..." : "Build"}
+        </Button>
+
+        <Button
+          onClick={deployCode}
+          disabled={loading !== null || !isBuilt}
+        >
+          {loading === "deploy" ? "Deploying..." : "Deploy"}
+        </Button>
+
+        <Input
+          placeholder="Cron (e.g., 0 * * * *)"
+          value={cronSchedule}
+          onChange={(e) => setCronSchedule(e.target.value)}
+          className="w-40 h-8 text-sm"
+        />
+
+        <div className="w-px h-6 bg-border mx-1" />
+
         <Button
           variant="secondary"
           onClick={saveSnapshot}
           disabled={loading !== null || session?.status !== "running"}
         >
-          {loading === "snapshot" ? "Saving..." : "Save Environment"}
+          {loading === "snapshot" ? "Saving..." : "Save Env"}
         </Button>
 
         <Button

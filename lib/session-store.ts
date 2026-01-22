@@ -6,24 +6,31 @@ export interface Session {
   createdAt: Date;
 }
 
-// In-memory singleton storing current session
-let currentSession: Session | null = null;
+// Use globalThis to persist session across hot reloads in dev mode
+const globalForSession = globalThis as unknown as {
+  currentSession: Session | null;
+};
+
+// Initialize if not present
+if (globalForSession.currentSession === undefined) {
+  globalForSession.currentSession = null;
+}
 
 export function getSession(): Session | null {
-  return currentSession;
+  return globalForSession.currentSession;
 }
 
 export function setSession(session: Session | null): void {
-  currentSession = session;
+  globalForSession.currentSession = session;
 }
 
 export function updateSession(updates: Partial<Session>): Session | null {
-  if (currentSession) {
-    currentSession = { ...currentSession, ...updates };
+  if (globalForSession.currentSession) {
+    globalForSession.currentSession = { ...globalForSession.currentSession, ...updates };
   }
-  return currentSession;
+  return globalForSession.currentSession;
 }
 
 export function clearSession(): void {
-  currentSession = null;
+  globalForSession.currentSession = null;
 }
