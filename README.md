@@ -1,36 +1,132 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Sandbox FaaS
 
-## Getting Started
+A white-labeled FaaS (Function-as-a-Service) platform that uses Vercel Sandbox for development/testing and deploys to Vercel Serverless Functions (Fluid Compute) for production.
 
-First, run the development server:
+## Features
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+- **Interactive Code Editor**: Write and test Node.js/TypeScript code in real-time
+- **Sandbox Execution**: Run code in isolated Vercel Sandbox microVMs (Node.js 24)
+- **Build & Deploy**: Bundle code with esbuild and deploy to Vercel Serverless Functions
+- **Session Management**: Create, snapshot, and restore sandbox sessions
+- **Deployment Management**: List, copy URLs, and delete deployments
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         Web UI                                   │
+│  ┌──────────────┐  ┌──────────────┐  ┌───────────────────────┐  │
+│  │ Code Editor  │  │    Output    │  │  Deployed Functions   │  │
+│  │  (textarea)  │  │    Panel     │  │  - URL, status, cron  │  │
+│  └──────────────┘  └──────────────┘  └───────────────────────┘  │
+│  [New Session] [Run] [Build] [Deploy] [Save Env] [Restore]      │
+└─────────────────────────┬───────────────────────────────────────┘
+                          │
+        ┌─────────────────┼─────────────────────┐
+        ▼                 ▼                     ▼
+┌───────────────┐  ┌───────────────┐     ┌───────────────────┐
+│   Sandbox     │  │  Build API    │     │  Vercel Deploy    │
+│  (Dev/Test)   │──│  (esbuild)    │────▶│  (Build Output)   │
+│  Node.js 24   │  │  bundle code  │     │  Fluid Compute    │
+└───────────────┘  └───────────────┘     └───────────────────┘
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## User Workflow
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+1. **Write & Test**: Write code in editor, click "Run" to test in Sandbox
+2. **Build**: Click "Build" to bundle with esbuild
+3. **Deploy**: Click "Deploy" to create Vercel Serverless Function
+4. **Manage**: View deployed functions, copy URLs, delete deployments
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Function Signature (Web Standard)
 
-## Learn More
+Users write Web Standard Request/Response handlers:
 
-To learn more about Next.js, take a look at the following resources:
+```typescript
+export default async function handler(req: Request): Promise<Response> {
+  const url = new URL(req.url, "http://localhost");
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+  if (req.method === "GET") {
+    return new Response(JSON.stringify({ message: "Hello!" }), {
+      headers: { "Content-Type": "application/json" }
+    });
+  }
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+  return new Response("Method not allowed", { status: 405 });
+}
+```
 
-## Deploy on Vercel
+The build process wraps this in a Node.js adapter for Vercel's runtime.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Environment Variables
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```bash
+# Required for Vercel deployments
+VERCEL_API_TOKEN=xxx           # Vercel API token
+VERCEL_WORKER_PROJECT_ID=xxx   # Project ID for function deployments
+VERCEL_TEAM_ID=xxx             # Team ID (optional)
+```
+
+## API Routes
+
+| Route | Method | Description |
+|-------|--------|-------------|
+| `/api/session` | POST | Create new sandbox session |
+| `/api/session` | GET | Get current session status |
+| `/api/session` | DELETE | Stop session |
+| `/api/run` | POST | Execute code in sandbox (SSE) |
+| `/api/build` | POST | Bundle code with esbuild (SSE) |
+| `/api/deploy` | POST | Deploy to Vercel |
+| `/api/deployments` | GET | List all deployments |
+| `/api/deployments/[id]` | GET | Get deployment details |
+| `/api/deployments/[id]` | DELETE | Delete deployment |
+| `/api/snapshot` | POST | Create sandbox snapshot |
+| `/api/restore` | POST | Restore from snapshot |
+
+## Technical Details
+
+### Build Process
+
+1. User code saved to `/tmp/src/handler.ts` in sandbox
+2. esbuild bundles to CommonJS: `--format=cjs --platform=node --target=node22`
+3. Bundled code wrapped with Node.js `(req, res)` adapter
+4. Deployed using Vercel Build Output API v3
+
+### Build Output Structure
+
+```
+.vercel/output/
+├── config.json              # Routes and optional cron config
+└── functions/
+    └── api/
+        └── handler.func/
+            ├── .vc-config.json   # Runtime: nodejs24.x
+            └── index.js          # Wrapped handler code
+```
+
+### Handler Wrapping
+
+Web Standard handlers are wrapped for Node.js compatibility:
+
+- Converts Node.js `req` to Web Standard `Request`
+- Calls user's handler
+- Converts Web Standard `Response` back to Node.js `res`
+
+## Development
+
+```bash
+npm install
+npm run dev
+```
+
+## Key Files
+
+| File | Purpose |
+|------|---------|
+| `components/playground.tsx` | Main UI component |
+| `lib/sandbox.ts` | Sandbox SDK wrapper |
+| `lib/session-store.ts` | In-memory session state |
+| `lib/deployments-store.ts` | In-memory deployments state |
+| `lib/vercel-deploy.ts` | Vercel API helpers & handler wrapping |
+| `app/api/build/route.ts` | esbuild bundling endpoint |
+| `app/api/deploy/route.ts` | Deployment endpoint |
