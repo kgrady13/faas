@@ -12,12 +12,14 @@ interface CreateDeploymentOptions {
   files: VercelFile[];
   functionName: string;
   cronSchedule?: string;
+  regions?: string[];
 }
 
 interface DeploymentResponse {
   id: string;
   url: string;
   readyState: 'QUEUED' | 'BUILDING' | 'READY' | 'ERROR' | 'CANCELED';
+  regions?: string[];
   errorMessage?: string;
 }
 
@@ -190,7 +192,7 @@ export function generateBuildOutput(
  */
 export async function createDeployment(options: CreateDeploymentOptions): Promise<DeploymentResponse> {
   const { token, teamId, projectId } = getEnvConfig();
-  const { files, functionName } = options;
+  const { files, functionName, regions } = options;
 
   // Upload all files and build the file list
   const uploadedFiles: { file: string; sha: string; size: number }[] = [];
@@ -208,7 +210,7 @@ export async function createDeployment(options: CreateDeploymentOptions): Promis
   const params = new URLSearchParams();
   if (teamId) params.set('teamId', teamId);
 
-  const deploymentBody = {
+  const deploymentBody: Record<string, unknown> = {
     name: projectId,
     project: projectId,
     files: uploadedFiles,
@@ -218,6 +220,11 @@ export async function createDeployment(options: CreateDeploymentOptions): Promis
       deployedAt: new Date().toISOString(),
     },
   };
+
+  // Add regions if specified
+  if (regions && regions.length > 0) {
+    deploymentBody.regions = regions;
+  }
 
   const response = await fetch(`${VERCEL_API_BASE}/v13/deployments?${params}`, {
     method: 'POST',
@@ -239,6 +246,7 @@ export async function createDeployment(options: CreateDeploymentOptions): Promis
     id: deployment.id,
     url: `https://${deployment.url}`,
     readyState: deployment.readyState,
+    regions: deployment.regions,
     errorMessage: deployment.errorMessage,
   };
 }
@@ -272,6 +280,7 @@ export async function getDeploymentStatus(deploymentId: string): Promise<Deploym
     id: deployment.id,
     url: `https://${deployment.url}`,
     readyState: deployment.readyState,
+    regions: deployment.regions,
     errorMessage: deployment.errorMessage,
   };
 }
@@ -299,4 +308,38 @@ export async function deleteVercelDeployment(deploymentId: string): Promise<void
     const error = await response.text();
     throw new Error(`Failed to delete deployment: ${error}`);
   }
+}
+
+/**
+ * Stream runtime logs for a deployment from Vercel
+ * Returns a ReadableStream of JSON log objects
+ */
+export async function streamDeploymentLogs(
+  deploymentId: string
+): Promise<ReadableStream<Uint8Array>> {
+  const { token, teamId, projectId } = getEnvConfig();
+
+  const params = new URLSearchParams();
+  if (teamId) params.set('teamId', teamId);
+
+  const response = await fetch(
+    `${VERCEL_API_BASE}/v1/projects/${projectId}/deployments/${deploymentId}/runtime-logs?${params}`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/stream+json',
+      },
+    }
+  );
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`Failed to fetch deployment logs: ${error}`);
+  }
+
+  if (!response.body) {
+    throw new Error('No response body for log stream');
+  }
+
+  return response.body;
 }

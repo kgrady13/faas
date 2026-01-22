@@ -5,6 +5,7 @@ export interface Deployment {
   createdAt: Date;
   status: 'building' | 'queued' | 'ready' | 'error' | 'canceled';
   cronSchedule?: string;
+  regions?: string[];
   errorMessage?: string;
   buildLogs?: string[];
 }

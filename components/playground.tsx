@@ -16,6 +16,24 @@ import {
   ComboboxItem,
   ComboboxEmpty,
 } from "@/components/ui/combobox";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuCheckboxItem,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetDescription,
+} from "@/components/ui/sheet";
+import { Terminal, TerminalHeader, TerminalTitle, TerminalContent, TerminalActions, TerminalCopyButton, TerminalClearButton } from "@/components/ai-elements/terminal";
+import { Clock, Copy, MoreVertical } from "lucide-react";
 
 interface Session {
   sandboxId: string;
@@ -39,22 +57,62 @@ interface Deployment {
   functionUrl: string;
   status: "building" | "queued" | "ready" | "error" | "canceled";
   cronSchedule?: string;
+  regions?: string[];
   createdAt: string;
   errorMessage?: string;
 }
 
+interface RuntimeLog {
+  level: "error" | "warning" | "info";
+  message: string;
+  rowId: string;
+  source: "delimiter" | "edge-function" | "edge-middleware" | "serverless" | "request";
+  timestampInMs: number;
+  domain?: string;
+  requestMethod?: string;
+  requestPath?: string;
+  responseStatusCode?: number;
+  messageTruncated?: boolean;
+}
+
 const CRON_PRESETS = [
   { value: "", label: "No schedule" },
-  { value: "* * * * *", label: "1 minute" },
-  { value: "*/5 * * * *", label: "5 minutes" },
-  { value: "*/15 * * * *", label: "15 minutes" },
+  { value: "* * * * *", label: "Every minute" },
+  { value: "*/5 * * * *", label: "Every 5 minutes" },
+  { value: "*/15 * * * *", label: "Every 15 minutes" },
   { value: "0 * * * *", label: "Hourly" },
-  { value: "0 */6 * * *", label: "6 hours" },
+  { value: "0 */6 * * *", label: "Every 6 hours" },
   { value: "0 0 * * *", label: "Daily (midnight)" },
   { value: "0 9 * * *", label: "Daily (9am)" },
   { value: "0 0 * * 0", label: "Weekly (Sunday)" },
   { value: "0 0 1 * *", label: "Monthly (1st)" },
 ];
+
+const REGION_OPTIONS = [
+  { value: "iad1", label: "Washington, D.C., USA" },
+  { value: "sfo1", label: "San Francisco, USA" },
+  { value: "pdx1", label: "Portland, USA" },
+  { value: "cle1", label: "Cleveland, USA" },
+  { value: "gru1", label: "São Paulo, Brazil" },
+  { value: "hnd1", label: "Tokyo, Japan" },
+  { value: "icn1", label: "Seoul, South Korea" },
+  { value: "kix1", label: "Osaka, Japan" },
+  { value: "sin1", label: "Singapore" },
+  { value: "bom1", label: "Mumbai, India" },
+  { value: "syd1", label: "Sydney, Australia" },
+  { value: "cdg1", label: "Paris, France" },
+  { value: "arn1", label: "Stockholm, Sweden" },
+  { value: "dub1", label: "Dublin, Ireland" },
+  { value: "lhr1", label: "London, UK" },
+  { value: "fra1", label: "Frankfurt, Germany" },
+  { value: "cpt1", label: "Cape Town, South Africa" },
+];
+
+function getCronLabel(cronExpression: string | undefined): string | null {
+  if (!cronExpression) return null;
+  const preset = CRON_PRESETS.find((p) => p.value === cronExpression);
+  return preset?.label || null;
+}
 
 const DEFAULT_CODE = `// Web Standard Function Handler
 // Click "Run" to test, "Deploy" for Vercel Fluid Compute
@@ -99,6 +157,13 @@ export default function Playground() {
   const [remainingTime, setRemainingTime] = useState<number>(0);
   const [deployments, setDeployments] = useState<Deployment[]>([]);
   const [cronSchedule, setCronSchedule] = useState("");
+  const [inspectedDeployment, setInspectedDeployment] = useState<Deployment | null>(null);
+  const [inspectTab, setInspectTab] = useState<"details" | "logs">("details");
+  const [runtimeLogs, setRuntimeLogs] = useState<RuntimeLog[]>([]);
+  const [regions, setRegions] = useState<string[]>(["iad1"]);
+  const [logsLoading, setLogsLoading] = useState(false);
+  const [logsError, setLogsError] = useState<string | null>(null);
+  const logsAbortControllerRef = useRef<AbortController | null>(null);
   const outputRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll to bottom when new output arrives
@@ -107,6 +172,7 @@ export default function Playground() {
       outputRef.current.scrollTop = outputRef.current.scrollHeight;
     }
   }, [outputs]);
+
 
   const addOutput = (type: Output["type"], content: string) => {
     setOutputs((prev) => [...prev, { type, content, timestamp: new Date() }]);
@@ -291,6 +357,7 @@ export default function Playground() {
           code,
           functionName: "handler",
           cronSchedule: cronSchedule || undefined,
+          regions: regions.length > 0 ? regions : undefined,
         }),
       });
 
@@ -490,6 +557,146 @@ export default function Playground() {
     const secs = seconds % 60;
     return `${minutes}:${secs.toString().padStart(2, "0")}`;
   };
+
+  const formatLogTime = (timestampInMs: number) => {
+    const date = new Date(timestampInMs);
+    return date.toLocaleTimeString("en-US", {
+      hour12: false,
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    });
+  };
+
+  const formatLogsAsString = (logs: RuntimeLog[]): string => {
+    if (logs.length === 0) return "";
+    return logs.map((log) => {
+      const time = formatLogTime(log.timestampInMs);
+      const level = log.level.toUpperCase().padEnd(7);
+      let line = `${time} ${level} ${log.message}`;
+      if (log.requestMethod && log.requestPath) {
+        line += ` ${log.requestMethod} ${log.requestPath}`;
+        if (log.responseStatusCode) {
+          line += ` ${log.responseStatusCode}`;
+        }
+      }
+      return line;
+    }).join("\n");
+  };
+
+  const openInspectSheet = (deployment: Deployment) => {
+    setInspectedDeployment(deployment);
+    setInspectTab("details");
+    setRuntimeLogs([]);
+  };
+
+  const closeInspectSheet = () => {
+    // Abort any ongoing log stream
+    if (logsAbortControllerRef.current) {
+      logsAbortControllerRef.current.abort();
+      logsAbortControllerRef.current = null;
+    }
+    setInspectedDeployment(null);
+    setRuntimeLogs([]);
+    setLogsLoading(false);
+    setLogsError(null);
+  };
+
+  const streamLogs = async (deploymentId: string) => {
+    // Abort any previous stream
+    if (logsAbortControllerRef.current) {
+      logsAbortControllerRef.current.abort();
+    }
+
+    const abortController = new AbortController();
+    logsAbortControllerRef.current = abortController;
+
+    setLogsLoading(true);
+    setRuntimeLogs([]);
+    setLogsError(null);
+
+    try {
+      const res = await fetch(`/api/deployments/${deploymentId}/logs`, {
+        signal: abortController.signal,
+      });
+
+      const contentType = res.headers.get("content-type");
+      if (contentType?.includes("application/json")) {
+        const data = await res.json();
+        if (!data.success) {
+          setLogsError(data.error || "Failed to fetch logs");
+        }
+        setLogsLoading(false);
+        return;
+      }
+
+      const reader = res.body?.getReader();
+      if (!reader) {
+        setLogsError("Failed to read response stream");
+        setLogsLoading(false);
+        return;
+      }
+
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            const jsonStr = line.slice(6);
+            try {
+              const event = JSON.parse(jsonStr);
+              if (event.type === "log" && event.data) {
+                setRuntimeLogs((prev) => [...prev, event.data as RuntimeLog]);
+              } else if (event.type === "connected") {
+                setLogsLoading(false);
+              } else if (event.type === "error") {
+                setLogsError(event.data || "Unknown error");
+                setLogsLoading(false);
+              }
+            } catch {
+              // Ignore parse errors
+            }
+          }
+        }
+      }
+    } catch (error) {
+      if (error instanceof Error && error.name !== "AbortError") {
+        setLogsError(error.message);
+      }
+    } finally {
+      setLogsLoading(false);
+    }
+  };
+
+  // Start streaming logs only when logs tab is active
+  useEffect(() => {
+    // Only stream if sheet is open AND logs tab is selected
+    if (!inspectedDeployment || inspectTab !== "logs") {
+      // Abort any existing stream when not on logs tab
+      if (logsAbortControllerRef.current) {
+        logsAbortControllerRef.current.abort();
+        logsAbortControllerRef.current = null;
+      }
+      return;
+    }
+
+    streamLogs(inspectedDeployment.id);
+
+    return () => {
+      if (logsAbortControllerRef.current) {
+        logsAbortControllerRef.current.abort();
+        logsAbortControllerRef.current = null;
+      }
+    };
+  }, [inspectedDeployment, inspectTab]);
 
   const getStatusBadge = () => {
     if (!session) {
@@ -693,15 +900,32 @@ export default function Playground() {
                   {deployments.map((deployment) => (
                     <div key={deployment.id} className="p-3 flex items-center gap-3 text-sm">
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-medium truncate">
                             {deployment.functionName}
                           </span>
                           {getDeploymentStatusBadge(deployment.status)}
                           {deployment.cronSchedule && (
-                            <span className="text-xs text-muted-foreground">
-                              cron: {deployment.cronSchedule}
-                            </span>
+                            <>
+                              <Clock className="size-3 -mr-1 text-muted-foreground" />
+                              <span className="text-xs text-muted-foreground">
+                                cron
+                              </span>
+                            </>
+                          )}
+                          {deployment.regions && deployment.regions.length > 0 && (
+                            <div className="flex items-center gap-1">
+                              {deployment.regions.slice(0, 3).map((region) => (
+                                <Badge key={region} variant="outline" className="text-xs py-0 px-1">
+                                  {region}
+                                </Badge>
+                              ))}
+                              {deployment.regions.length > 3 && (
+                                <span className="text-xs text-muted-foreground">
+                                  +{deployment.regions.length - 3}
+                                </span>
+                              )}
+                            </div>
                           )}
                         </div>
                         {deployment.status === "ready" && (
@@ -719,19 +943,35 @@ export default function Playground() {
                         {deployment.status === "ready" && (
                           <Button
                             variant="ghost"
-                            size="xs"
+                            size="icon"
+                            className="size-7"
                             onClick={() => copyToClipboard(deployment.functionUrl)}
                           >
-                            Copy
+                            <Copy className="size-3.5" />
                           </Button>
                         )}
                         <Button
                           variant="ghost"
                           size="xs"
-                          onClick={() => deleteDeployment(deployment.id)}
+                          onClick={() => openInspectSheet(deployment)}
                         >
-                          Delete
+                          Inspect
                         </Button>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="icon" className="size-7">
+                              <MoreVertical className="size-3.5" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="text-xs">
+                            <DropdownMenuItem
+                              variant="destructive"
+                              onClick={() => deleteDeployment(deployment.id)}
+                            >
+                              Delete
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       </div>
                     </div>
                   ))}
@@ -780,7 +1020,7 @@ export default function Playground() {
                 <ComboboxItem
                   key={preset.value || "none"}
                   value={preset.value}
-                  className="whitespace-nowrap pr-2 text-xs aria-selected:bg-foreground aria-selected:text-background **:data-[slot=combobox-item-indicator]:hidden"
+                  className="whitespace-nowrap pr-2 text-xs **:data-[slot=combobox-item-indicator]:hidden"
                 >
                   {preset.label}
                 </ComboboxItem>
@@ -788,6 +1028,36 @@ export default function Playground() {
             </ComboboxList>
           </ComboboxContent>
         </Combobox>
+
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" size="sm">
+              {regions.length > 0 ? `Regions (${regions.length})` : "Regions"}
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent side="top" align="start" className="w-auto! max-h-64 overflow-y-auto text-xs">
+            <DropdownMenuLabel className="text-xs">Deploy to regions</DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            {REGION_OPTIONS.map((region) => (
+              <DropdownMenuCheckboxItem
+                key={region.value}
+                checked={regions.includes(region.value)}
+                onCheckedChange={(checked) => {
+                  if (checked) {
+                    setRegions([...regions, region.value]);
+                  } else {
+                    setRegions(regions.filter((r) => r !== region.value));
+                  }
+                }}
+                onSelect={(e) => e.preventDefault()}
+                className="text-xs whitespace-nowrap"
+              >
+                <span className="font-mono mr-2 text-emerald-500">{region.value}</span>
+                {region.label}
+              </DropdownMenuCheckboxItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
 
         <div className="w-px h-6 bg-border mx-1" />
 
@@ -821,6 +1091,161 @@ export default function Playground() {
           </span>
         )}
       </footer>
+
+      {/* Inspection Sheet */}
+      <Sheet open={!!inspectedDeployment} onOpenChange={(open) => !open && closeInspectSheet()}>
+        <SheetContent side="right" className="sm:max-w-lg! w-full flex flex-col gap-0">
+          <SheetHeader>
+            <SheetTitle>
+              {inspectedDeployment?.functionName || "Deployment"}
+            </SheetTitle>
+            <SheetDescription>
+              {inspectedDeployment?.id.slice(0, 12)}...
+            </SheetDescription>
+          </SheetHeader>
+
+          {/* Tab Navigation */}
+          <div className="flex border-b border-border">
+            <button
+              onClick={() => setInspectTab("details")}
+              className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${inspectTab === "details"
+                ? "border-primary text-foreground"
+                : "border-transparent text-muted-foreground hover:text-foreground"
+                }`}
+            >
+              Details
+            </button>
+            <button
+              onClick={() => setInspectTab("logs")}
+              className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${inspectTab === "logs"
+                ? "border-primary text-foreground"
+                : "border-transparent text-muted-foreground hover:text-foreground"
+                }`}
+            >
+              Runtime Logs
+            </button>
+          </div>
+
+          {/* Tab Content */}
+          <div className="flex-1 overflow-auto">
+            {inspectTab === "details" && inspectedDeployment && (
+              <div className="space-y-4 p-4">
+                <div className="grid grid-cols-2 gap-4 text-sm">
+                  <div>
+                    <div className="text-muted-foreground mb-1">Status</div>
+                    <div>{getDeploymentStatusBadge(inspectedDeployment.status)}</div>
+                  </div>
+                  <div>
+                    <div className="text-muted-foreground mb-1">Created</div>
+                    <div className="font-mono text-xs">
+                      {new Date(inspectedDeployment.createdAt).toLocaleString()}
+                    </div>
+                  </div>
+                  <div className="col-span-2">
+                    <div className="text-muted-foreground mb-1">Function URL</div>
+                    {inspectedDeployment.status === "ready" ? (
+                      <div className="flex items-center gap-2">
+                        <code className="text-xs bg-muted px-2 py-1 rounded flex-1 truncate">
+                          {inspectedDeployment.functionUrl}
+                        </code>
+                        <Button
+                          variant="outline"
+                          size="xs"
+                          onClick={() => copyToClipboard(inspectedDeployment.functionUrl)}
+                        >
+                          Copy
+                        </Button>
+                      </div>
+                    ) : (
+                      <span className="text-muted-foreground text-xs">Not available</span>
+                    )}
+                  </div>
+                  <div className="col-span-2">
+                    <div className="text-muted-foreground mb-1">Deployment URL</div>
+                    <code className="text-xs bg-muted px-2 py-1 rounded block truncate">
+                      {inspectedDeployment.url}
+                    </code>
+                  </div>
+                  <div className="col-span-2">
+                    <div className="text-muted-foreground mb-1">Cron Schedule</div>
+                    {inspectedDeployment.cronSchedule ? (
+                      <div className="flex items-center gap-2">
+                        <code className="text-xs bg-muted px-2 py-1 rounded">
+                          {inspectedDeployment.cronSchedule}
+                        </code>
+                        {getCronLabel(inspectedDeployment.cronSchedule) && (
+                          <span className="text-xs text-muted-foreground">
+                            ({getCronLabel(inspectedDeployment.cronSchedule)})
+                          </span>
+                        )}
+                      </div>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">None</span>
+                    )}
+                  </div>
+                  <div className="col-span-2">
+                    <div className="text-muted-foreground mb-1">Regions</div>
+                    {inspectedDeployment.regions && inspectedDeployment.regions.length > 0 ? (
+                      <div className="flex flex-wrap gap-1">
+                        {inspectedDeployment.regions.map((region) => {
+                          const regionInfo = REGION_OPTIONS.find((r) => r.value === region);
+                          return (
+                            <Badge key={region} variant="outline" className="text-xs">
+                              {region}
+                              {regionInfo && (
+                                <span className="ml-1 text-muted-foreground">
+                                  ({regionInfo.label})
+                                </span>
+                              )}
+                            </Badge>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">Default (auto)</span>
+                    )}
+                  </div>
+                  {inspectedDeployment.errorMessage && (
+                    <div className="col-span-2">
+                      <div className="text-muted-foreground mb-1">Error</div>
+                      <div className="text-destructive text-xs bg-destructive/10 p-2 rounded">
+                        {inspectedDeployment.errorMessage}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {inspectTab === "logs" && (
+              <div className="h-full flex flex-col">
+                {logsError && (
+                  <div className="text-destructive text-sm bg-destructive/10 p-2 rounded mx-4 mt-4">
+                    Error: {logsError}
+                  </div>
+                )}
+                <Terminal
+                  output={runtimeLogs.length === 0 && !logsLoading && !logsError
+                    ? "No logs yet. Invoke the function to see runtime logs."
+                    : formatLogsAsString(runtimeLogs)}
+                  isStreaming={logsLoading}
+                  onClear={() => setRuntimeLogs([])}
+                  className="flex-1 border-0 rounded-none bg-muted/30 text-foreground"
+                >
+                  <TerminalHeader className="border-border bg-muted/50">
+                    <TerminalTitle className="text-muted-foreground">Runtime Logs</TerminalTitle>
+                    <TerminalActions>
+                      <TerminalCopyButton className="text-muted-foreground hover:bg-muted hover:text-foreground" />
+                      <TerminalClearButton className="text-muted-foreground hover:bg-muted hover:text-foreground" />
+                    </TerminalActions>
+                  </TerminalHeader>
+                  <TerminalContent className="max-h-none flex-1" />
+                </Terminal>
+              </div>
+            )}
+          </div>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

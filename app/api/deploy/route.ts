@@ -6,7 +6,7 @@ import { addDeployment, updateDeployment, type Deployment } from "@/lib/deployme
 
 export async function POST(request: NextRequest) {
   const body = await request.json();
-  const { code, functionName = "handler", cronSchedule } = body;
+  const { code, functionName = "handler", cronSchedule, regions } = body;
 
   if (!code || typeof code !== "string") {
     return new Response(
@@ -96,9 +96,11 @@ export async function POST(request: NextRequest) {
           files,
           functionName,
           cronSchedule,
+          regions,
         });
 
         // Store deployment in our local store
+        // Use user-selected regions, or fetch from API response once deployment is ready
         const deployment: Deployment = {
           id: deploymentResult.id,
           url: deploymentResult.url,
@@ -108,6 +110,7 @@ export async function POST(request: NextRequest) {
                   deploymentResult.readyState === "ERROR" ? "error" :
                   deploymentResult.readyState === "QUEUED" ? "queued" : "building",
           cronSchedule,
+          regions: regions || deploymentResult.regions,
           errorMessage: deploymentResult.errorMessage,
         };
 
@@ -183,11 +186,16 @@ async function pollDeploymentStatus(deploymentId: string) {
                         status.readyState === 'CANCELED' ? 'canceled' :
                         status.readyState === 'QUEUED' ? 'queued' : 'building';
 
-      updateDeployment(deploymentId, {
+      const updates: Partial<Deployment> = {
         status: newStatus,
         url: status.url,
         errorMessage: status.errorMessage,
-      });
+      };
+      // Only update regions if API returns them
+      if (status.regions && status.regions.length > 0) {
+        updates.regions = status.regions;
+      }
+      updateDeployment(deploymentId, updates);
 
       // Stop polling if deployment is done
       if (newStatus === 'ready' || newStatus === 'error' || newStatus === 'canceled') {

@@ -13,6 +13,7 @@ export async function GET() {
         functionUrl: `${d.url}/api/${d.functionName}`,
         status: d.status,
         cronSchedule: d.cronSchedule,
+        regions: d.regions,
         createdAt: d.createdAt.toISOString(),
         errorMessage: d.errorMessage,
       })),
