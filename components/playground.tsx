@@ -5,6 +5,14 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
+import {
+  Combobox,
+  ComboboxInput,
+  ComboboxContent,
+  ComboboxList,
+  ComboboxItem,
+  ComboboxEmpty,
+} from "@/components/ui/combobox";
 
 interface Session {
   sandboxId: string;
@@ -32,12 +40,29 @@ interface Deployment {
   errorMessage?: string;
 }
 
+const CRON_PRESETS = [
+  { value: "", label: "No schedule" },
+  { value: "* * * * *", label: "1 minute" },
+  { value: "*/5 * * * *", label: "5 minutes" },
+  { value: "*/15 * * * *", label: "15 minutes" },
+  { value: "0 * * * *", label: "Hourly" },
+  { value: "0 */6 * * *", label: "6 hours" },
+  { value: "0 0 * * *", label: "Daily (midnight)" },
+  { value: "0 9 * * *", label: "Daily (9am)" },
+  { value: "0 0 * * 0", label: "Weekly (Sunday)" },
+  { value: "0 0 1 * *", label: "Monthly (1st)" },
+];
+
 const DEFAULT_CODE = `// Web Standard Function Handler
 // Click "Run" to test, "Build" + "Deploy" for Vercel Fluid Compute
+
+console.log("Hello World");
 
 export default async function handler(req: Request): Promise<Response> {
   // Use base URL for relative paths (Vercel passes relative URLs)
   const url = new URL(req.url, "http://localhost");
+
+  console.log("Hello From Handler");
 
   if (req.method === "GET") {
     return new Response(JSON.stringify({
@@ -758,12 +783,27 @@ export default function Playground() {
           {loading === "deploy" ? "Deploying..." : "Deploy"}
         </Button>
 
-        <Input
-          placeholder="Cron (e.g., 0 * * * *)"
-          value={cronSchedule}
-          onChange={(e) => setCronSchedule(e.target.value)}
-          className="w-40 h-8 text-sm"
-        />
+        <Combobox value={cronSchedule} onValueChange={(value) => setCronSchedule(value ?? "")}>
+          <ComboboxInput
+            placeholder="Cron schedule"
+            className="w-44 h-8 text-sm"
+          />
+          <ComboboxContent side="top" className="text-xs">
+            <ComboboxList>
+              <ComboboxEmpty className="justify-start pl-2">Custom expression</ComboboxEmpty>
+              {CRON_PRESETS.map((preset) => (
+                <ComboboxItem
+                  key={preset.value || "none"}
+                  value={preset.value}
+                  label={preset.label}
+                  className="whitespace-nowrap pr-2 text-xs aria-selected:bg-foreground aria-selected:text-background [&_[data-slot=combobox-item-indicator]]:hidden"
+                >
+                  {preset.label}
+                </ComboboxItem>
+              ))}
+            </ComboboxList>
+          </ComboboxContent>
+        </Combobox>
 
         <div className="w-px h-6 bg-border mx-1" />
 
