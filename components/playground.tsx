@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import Ansi from "ansi-to-react";
 import * as prettier from "prettier/standalone";
 import * as prettierPluginTypescript from "prettier/plugins/typescript";
 import * as prettierPluginEstree from "prettier/plugins/estree";
@@ -707,7 +708,11 @@ export default function Playground() {
                         : "text-foreground"
                       }`}
                   >
-                    {output.type === "system" ? `> ${output.content}` : output.content}
+                    {output.type === "system" ? (
+                      `> ${output.content}`
+                    ) : (
+                      <Ansi useClasses>{output.content}</Ansi>
+                    )}
                   </div>
                 ))
               )}

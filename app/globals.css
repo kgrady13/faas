@@ -124,3 +124,28 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* ANSI Terminal Colors */
+.ansi-black-fg { color: #1e1e1e; }
+.ansi-red-fg { color: #ef4444; }
+.ansi-green-fg { color: #22c55e; }
+.ansi-yellow-fg { color: #eab308; }
+.ansi-blue-fg { color: #3b82f6; }
+.ansi-magenta-fg { color: #d946ef; }
+.ansi-cyan-fg { color: #06b6d4; }
+.ansi-white-fg { color: #fafafa; }
+
+/* Bright variants */
+.ansi-bright-black-fg { color: #6b7280; }
+.ansi-bright-red-fg { color: #f87171; }
+.ansi-bright-green-fg { color: #4ade80; }
+.ansi-bright-yellow-fg { color: #facc15; }
+.ansi-bright-blue-fg { color: #60a5fa; }
+.ansi-bright-magenta-fg { color: #e879f9; }
+.ansi-bright-cyan-fg { color: #22d3ee; }
+.ansi-bright-white-fg { color: #ffffff; }
+
+/* Text styles */
+.ansi-bold { font-weight: bold; }
+.ansi-italic { font-style: italic; }
+.ansi-underline { text-decoration: underline; }
