@@ -4,10 +4,9 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import * as prettier from "prettier/standalone";
 import * as prettierPluginTypescript from "prettier/plugins/typescript";
 import * as prettierPluginEstree from "prettier/plugins/estree";
+import Editor from "@monaco-editor/react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Textarea } from "@/components/ui/textarea";
-import { Input } from "@/components/ui/input";
 import {
   Combobox,
   ComboboxInput,
@@ -656,15 +655,25 @@ export default function Playground() {
               Format
             </Button>
           </div>
-          <Textarea
+          <Editor
+            height="100%"
+            defaultLanguage="typescript"
             value={code}
-            onChange={(e) => {
-              setCode(e.target.value);
+            onChange={(value) => {
+              setCode(value || "");
               setIsBuilt(false);
             }}
-            className="flex-1 rounded-none border-0 shadow-none resize-none focus-visible:ring-0 font-mono text-sm min-h-0 overflow-auto"
-            placeholder="Write your Node.js code here..."
-            spellCheck={false}
+            theme="light"
+            options={{
+              minimap: { enabled: false },
+              fontSize: 14,
+              lineNumbers: "on",
+              scrollBeyondLastLine: false,
+              automaticLayout: true,
+              tabSize: 2,
+              wordWrap: "on",
+              padding: { top: 16 },
+            }}
           />
         </div>
 
