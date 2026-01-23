@@ -4,8 +4,16 @@
 
 This is a white-labeled FaaS platform allowing users to write, test, and deploy serverless functions. It uses Vercel Sandbox for development/testing and Vercel Serverless Functions for production deployment.
 
+## Monorepo Structure
+
+This is a **Turborepo monorepo** with the following apps:
+
+- **@faas/web** (`apps/web/`) - Next.js FaaS platform UI
+- **@faas/deployments** (`apps/deployments/`) - Vercel deployment target for user functions
+
 ## Tech Stack
 
+- **Monorepo**: Turborepo with Bun workspaces
 - **Framework**: Next.js 16.1.4 with React 19.2.3
 - **Styling**: Tailwind CSS 4 (via @tailwindcss/postcss)
 - **UI Components**: Shadcn/ui + Radix UI + Base UI
@@ -18,10 +26,18 @@ This is a white-labeled FaaS platform allowing users to write, test, and deploy 
 ## Commands
 
 ```bash
-bun dev           # Start development server
-bun run build     # Production build
-bun tsc --noEmit  # Type check
-bun lint          # Run ESLint
+# Root commands (via turbo)
+bun dev                           # Start all dev servers
+bun run build                     # Build all apps
+bun lint                          # Lint all apps
+
+# Filter to specific app
+bunx turbo run dev --filter=@faas/web
+bunx turbo run build --filter=@faas/web
+
+# Direct app commands
+cd apps/web && bun dev            # Start web dev server
+cd apps/web && bun tsc --noEmit   # Type check web app
 ```
 
 ## Key Implementation Details
@@ -78,6 +94,7 @@ module.exports = async (req, res) => {
 ```
 
 **Build Output API v3 Structure**:
+
 ```
 .vercel/output/
 ├── config.json          # version: 3, routes array
@@ -87,6 +104,7 @@ module.exports = async (req, res) => {
 ```
 
 **Important .vc-config.json settings**:
+
 - `runtime`: `nodejs24.x` (or nodejs22.x)
 - `handler`: `index.js` (the entry file)
 - `launcherType`: `Nodejs` (required for traditional Node.js handlers)
@@ -109,6 +127,7 @@ module.exports = async (req, res) => {
 ### API Response Pattern
 
 Standardized responses via `lib/api-response.ts`:
+
 - `jsonSuccess(data)` / `jsonError(message, status)` - NextResponse builders
 - `sseResponse(stream)` - SSE streaming responses
 - All responses follow `{ success: true/false, ... }` structure
@@ -116,6 +135,7 @@ Standardized responses via `lib/api-response.ts`:
 ### Session Validation
 
 Centralized in `lib/session-validation.ts`:
+
 - `validateActiveSession()` returns discriminated union
 - Success branch includes session data, failure branch includes error Response
 - Checks: session exists, not expired, not paused
@@ -123,6 +143,7 @@ Centralized in `lib/session-validation.ts`:
 ### Type System
 
 Discriminated union patterns in `lib/types.ts`:
+
 - `ApiResponse<T> = ApiSuccessResponse<T> | ApiErrorResponse`
 - SSE events typed with `SSEEventType` and `SSEEvent<T>`
 - Runtime logs include context: requestMethod, requestPath, responseStatusCode
@@ -146,50 +167,58 @@ VERCEL_OIDC_TOKEN        # Secure OIDC authentication
 ## File Structure
 
 ```
-app/
-├── api/
-│   ├── session/route.ts        # Session CRUD
-│   ├── run/route.ts            # Execute code (SSE)
-│   ├── build/route.ts          # esbuild bundling (SSE)
-│   ├── deploy/route.ts         # Vercel deployment (SSE)
-│   ├── stop/route.ts           # Stop running execution
-│   ├── deployments/
-│   │   ├── route.ts            # List deployments
-│   │   └── [id]/
-│   │       ├── route.ts        # Get/delete deployment
-│   │       └── logs/route.ts   # Get deployment logs
-│   ├── snapshot/route.ts       # Create snapshot
-│   └── restore/route.ts        # Restore snapshot
-├── page.tsx                    # Renders Playground
-└── layout.tsx
-
-components/
-├── playground/
-│   ├── index.tsx               # Main playground container
-│   ├── code-editor-panel.tsx   # Monaco editor wrapper
-│   ├── output-panel.tsx        # Execution output display
-│   ├── deployments-panel.tsx   # Deployments list
-│   └── footer-actions.tsx      # Action buttons
-└── ui/                         # Shadcn/ui components
-
-hooks/
-├── index.ts                    # Barrel exports
-├── use-session.ts              # Session state management
-├── use-deployments.ts          # Deployments CRUD
-├── use-code-execution.ts       # Run/build operations
-├── use-keyboard-shortcuts.ts   # Hotkey bindings
-└── use-runtime-logs.ts         # Live log streaming
-
-lib/
-├── api-response.ts             # Standardized API responses
-├── constants.ts                # Cron presets, regions, defaults
-├── deployments-store.ts        # Redis deployment operations
-├── format.ts                   # Time/log formatting utilities
-├── redis.ts                    # Upstash Redis client
-├── sandbox.ts                  # Sandbox SDK wrapper
-├── session-store.ts            # Session state (globalThis)
-├── session-validation.ts       # Request validation
-├── types.ts                    # TypeScript type definitions
-├── utils.ts                    # cn(), minDelay() utilities
-└── vercel-deploy.ts            # Vercel API + handler wrapping
+faas/                           # Monorepo root
+├── turbo.json                  # Turborepo task configuration
+├── package.json                # Root workspace config
+├── apps/
+│   ├── web/                    # @faas/web - Next.js FaaS platform
+│   │   ├── app/
+│   │   │   ├── api/
+│   │   │   │   ├── session/route.ts        # Session CRUD
+│   │   │   │   ├── run/route.ts            # Execute code (SSE)
+│   │   │   │   ├── build/route.ts          # esbuild bundling (SSE)
+│   │   │   │   ├── deploy/route.ts         # Vercel deployment (SSE)
+│   │   │   │   ├── stop/route.ts           # Stop running execution
+│   │   │   │   ├── deployments/
+│   │   │   │   │   ├── route.ts            # List deployments
+│   │   │   │   │   └── [id]/
+│   │   │   │   │       ├── route.ts        # Get/delete deployment
+│   │   │   │   │       └── logs/route.ts   # Get deployment logs
+│   │   │   │   ├── snapshot/route.ts       # Create snapshot
+│   │   │   │   └── restore/route.ts        # Restore snapshot
+│   │   │   ├── page.tsx                    # Renders Playground
+│   │   │   └── layout.tsx
+│   │   ├── components/
+│   │   │   ├── playground/
+│   │   │   │   ├── index.tsx               # Main playground container
+│   │   │   │   ├── code-editor-panel.tsx   # Monaco editor wrapper
+│   │   │   │   ├── output-panel.tsx        # Execution output display
+│   │   │   │   ├── deployments-panel.tsx   # Deployments list
+│   │   │   │   └── footer-actions.tsx      # Action buttons
+│   │   │   └── ui/                         # Shadcn/ui components
+│   │   ├── hooks/
+│   │   │   ├── index.ts                    # Barrel exports
+│   │   │   ├── use-session.ts              # Session state management
+│   │   │   ├── use-deployments.ts          # Deployments CRUD
+│   │   │   ├── use-code-execution.ts       # Run/build operations
+│   │   │   ├── use-keyboard-shortcuts.ts   # Hotkey bindings
+│   │   │   └── use-runtime-logs.ts         # Live log streaming
+│   │   ├── lib/
+│   │   │   ├── api-response.ts             # Standardized API responses
+│   │   │   ├── constants.ts                # Cron presets, regions, defaults
+│   │   │   ├── deployments-store.ts        # Redis deployment operations
+│   │   │   ├── format.ts                   # Time/log formatting utilities
+│   │   │   ├── redis.ts                    # Upstash Redis client
+│   │   │   ├── sandbox.ts                  # Sandbox SDK wrapper
+│   │   │   ├── session-store.ts            # Session state (globalThis)
+│   │   │   ├── session-validation.ts       # Request validation
+│   │   │   ├── types.ts                    # TypeScript type definitions
+│   │   │   ├── utils.ts                    # cn(), minDelay() utilities
+│   │   │   └── vercel-deploy.ts            # Vercel API + handler wrapping
+│   │   └── package.json
+│   └── deployments/            # @faas/deployments - Vercel deployment target
+│       ├── .vercel/            # Vercel project config (worker-deployments)
+│       ├── vercel.json
+│       └── package.json
+└── packages/                   # Shared packages (future use)
 ```

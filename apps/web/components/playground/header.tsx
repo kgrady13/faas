@@ -108,7 +108,7 @@ export function PlaygroundHeader({
 
   return (
     <header className="shrink-0 border-b border-border px-4 py-3 flex items-center justify-between">
-      <h1 className="text-lg font-semibold">VaaS</h1>
+      <h1 className="text-lg font-semibold">faas</h1>
       <div className="flex items-center gap-3 relative">
         {getStatusBadge()}
         {/* Dev Tools Button */}

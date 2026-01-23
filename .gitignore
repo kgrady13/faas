@@ -14,8 +14,8 @@
 /coverage
 
 # next.js
-/.next/
-/out/
+.next/
+out/
 
 # production
 /build
@@ -35,8 +35,12 @@ yarn-error.log*
 
 # vercel
 .vercel
+!apps/*/.vercel
 
 # typescript
 *.tsbuildinfo
 next-env.d.ts
 .env*.local
+
+# turborepo
+.turbo
