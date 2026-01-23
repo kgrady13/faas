@@ -1,11 +1,18 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import dynamic from "next/dynamic";
 import Ansi from "ansi-to-react";
-import * as prettier from "prettier/standalone";
-import * as prettierPluginTypescript from "prettier/plugins/typescript";
-import * as prettierPluginEstree from "prettier/plugins/estree";
-import Editor from "@monaco-editor/react";
+
+// Dynamically import Monaco Editor (~3MB) - don't block initial page load
+const Editor = dynamic(() => import("@monaco-editor/react"), {
+  ssr: false,
+  loading: () => (
+    <div className="h-full bg-muted/30 animate-pulse flex items-center justify-center text-muted-foreground text-sm">
+      Loading editor...
+    </div>
+  ),
+});
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -111,10 +118,11 @@ export default function Playground() {
     }
   }, []);
 
+  // Fetch session and deployments in parallel on mount
   useEffect(() => {
-    fetchSession();
-    fetchDeployments();
-  }, [fetchSession, fetchDeployments]);
+    Promise.all([fetchSession(), fetchDeployments()]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Poll deployments for status updates
   useEffect(() => {
@@ -491,6 +499,13 @@ export default function Playground() {
 
   const formatCode = async () => {
     try {
+      // Lazy load Prettier (~500KB) only when formatting is requested
+      const [prettier, prettierPluginTypescript, prettierPluginEstree] = await Promise.all([
+        import("prettier/standalone"),
+        import("prettier/plugins/typescript"),
+        import("prettier/plugins/estree"),
+      ]);
+
       const formatted = await prettier.format(code, {
         parser: "typescript",
         plugins: [prettierPluginTypescript, prettierPluginEstree],
