@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSession, setSession, clearSession } from "@/lib/session-store";
 import { createSandbox, stopSandbox } from "@/lib/sandbox";
+import { jsonSuccess, jsonError } from "@/lib/api-response";
 
 // POST /api/session - Create new session
 export async function POST() {
@@ -27,8 +28,7 @@ export async function POST() {
 
     setSession(session);
 
-    return NextResponse.json({
-      success: true,
+    return jsonSuccess({
       session: {
         ...session,
         remainingTime: Math.max(0, session.timeout - Date.now()),
@@ -36,10 +36,7 @@ export async function POST() {
     });
   } catch (error) {
     console.error("Failed to create session:", error);
-    return NextResponse.json(
-      { success: false, error: "Failed to create sandbox" },
-      { status: 500 }
-    );
+    return jsonError("Failed to create sandbox", 500);
   }
 }
 
@@ -77,10 +74,10 @@ export async function DELETE() {
     }
     clearSession();
 
-    return NextResponse.json({ success: true });
+    return jsonSuccess({});
   } catch (error) {
     console.error("Failed to stop session:", error);
     clearSession();
-    return NextResponse.json({ success: true }); // Still clear session even if stop fails
+    return jsonSuccess({}); // Still clear session even if stop fails
   }
 }

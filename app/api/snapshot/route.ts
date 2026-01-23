@@ -1,16 +1,13 @@
-import { NextResponse } from "next/server";
 import { getSession, updateSession } from "@/lib/session-store";
 import { createSnapshot } from "@/lib/sandbox";
+import { jsonSuccess, jsonError } from "@/lib/api-response";
 
 export async function POST() {
   try {
     const session = getSession();
 
     if (!session || !session.sandboxId) {
-      return NextResponse.json(
-        { success: false, error: "No active session" },
-        { status: 400 }
-      );
+      return jsonError("No active session", 400);
     }
 
     // Create snapshot (this stops the sandbox) - reconnects if needed
@@ -22,19 +19,15 @@ export async function POST() {
       status: "paused",
     });
 
-    return NextResponse.json({
-      success: true,
+    return jsonSuccess({
       snapshotId,
       message: "Snapshot created. Sandbox has been stopped. Use Restore to resume.",
     });
   } catch (error) {
     console.error("Failed to create snapshot:", error);
-    return NextResponse.json(
-      {
-        success: false,
-        error: error instanceof Error ? error.message : "Failed to create snapshot",
-      },
-      { status: 500 }
+    return jsonError(
+      error instanceof Error ? error.message : "Failed to create snapshot",
+      500
     );
   }
 }

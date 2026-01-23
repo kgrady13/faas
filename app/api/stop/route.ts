@@ -1,16 +1,13 @@
-import { NextResponse } from "next/server";
 import { getSession, clearSession } from "@/lib/session-store";
 import { stopSandbox } from "@/lib/sandbox";
+import { jsonSuccess, jsonError } from "@/lib/api-response";
 
 export async function POST() {
   try {
     const session = getSession();
 
     if (!session || !session.sandboxId) {
-      return NextResponse.json(
-        { success: false, error: "No active session" },
-        { status: 400 }
-      );
+      return jsonError("No active session", 400);
     }
 
     // Stop the sandbox (no snapshot created)
@@ -19,18 +16,14 @@ export async function POST() {
     // Clear the session completely
     clearSession();
 
-    return NextResponse.json({
-      success: true,
+    return jsonSuccess({
       message: "Sandbox stopped and session cleared.",
     });
   } catch (error) {
     console.error("Failed to stop sandbox:", error);
-    return NextResponse.json(
-      {
-        success: false,
-        error: error instanceof Error ? error.message : "Failed to stop sandbox",
-      },
-      { status: 500 }
+    return jsonError(
+      error instanceof Error ? error.message : "Failed to stop sandbox",
+      500
     );
   }
 }

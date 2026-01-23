@@ -1,10 +1,6 @@
-export interface Session {
-  sandboxId: string;
-  status: 'pending' | 'running' | 'stopping' | 'stopped' | 'paused' | 'failed';
-  timeout: number;
-  snapshotId?: string;
-  createdAt: Date;
-}
+import type { Session } from "./types";
+
+export type { Session };
 
 // Use globalThis to persist session across hot reloads in dev mode
 const globalForSession = globalThis as unknown as {

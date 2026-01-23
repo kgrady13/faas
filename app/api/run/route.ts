@@ -1,43 +1,22 @@
 import { NextRequest } from "next/server";
-import { getSession, updateSession } from "@/lib/session-store";
+import { updateSession } from "@/lib/session-store";
 import { executeCodeStreaming } from "@/lib/sandbox";
+import { sseError, sseResponse } from "@/lib/api-response";
+import { validateActiveSession } from "@/lib/session-validation";
 
 export async function POST(request: NextRequest) {
   const { code } = await request.json();
 
   if (!code || typeof code !== "string") {
-    return new Response(
-      JSON.stringify({ success: false, error: "Code is required" }),
-      { status: 400, headers: { "Content-Type": "application/json" } }
-    );
+    return sseError("Code is required", 400);
   }
 
-  const session = getSession();
-
-  if (!session || !session.sandboxId) {
-    return new Response(
-      JSON.stringify({ success: false, error: "No active session. Please create a new session." }),
-      { status: 400, headers: { "Content-Type": "application/json" } }
-    );
+  const validation = validateActiveSession();
+  if (!validation.valid) {
+    return validation.error;
   }
 
-  // Check if session has expired
-  if (Date.now() > session.timeout) {
-    return new Response(
-      JSON.stringify({ success: false, error: "Session has expired. Please create a new session." }),
-      { status: 400, headers: { "Content-Type": "application/json" } }
-    );
-  }
-
-  // Check if session is paused
-  if (session.status === "paused") {
-    return new Response(
-      JSON.stringify({ success: false, error: "Session is paused. Click 'Resume' to continue." }),
-      { status: 400, headers: { "Content-Type": "application/json" } }
-    );
-  }
-
-  const sandboxId = session.sandboxId;
+  const { sandboxId } = validation;
 
   // Create a readable stream for SSE
   const stream = new ReadableStream({
@@ -69,11 +48,5 @@ export async function POST(request: NextRequest) {
     },
   });
 
-  return new Response(stream, {
-    headers: {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
-      Connection: "keep-alive",
-    },
-  });
+  return sseResponse(stream);
 }

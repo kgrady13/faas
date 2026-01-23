@@ -1,5 +1,8 @@
 import { NextRequest } from "next/server";
 import { redis } from "./redis";
+import type { Deployment } from "./types";
+
+export type { Deployment };
 
 /**
  * Get a user identifier from the request (client IP).
@@ -13,18 +16,6 @@ export function getUserId(request: NextRequest): string {
   }
   // Fallback - in dev this might be ::1 or 127.0.0.1
   return request.headers.get("x-real-ip") || "anonymous";
-}
-
-export interface Deployment {
-  id: string;
-  url: string;
-  functionName: string;
-  createdAt: string; // ISO string for Redis serialization
-  status: "building" | "queued" | "ready" | "error" | "canceled";
-  cronSchedule?: string;
-  regions?: string[];
-  errorMessage?: string;
-  buildLogs?: string[];
 }
 
 // Key helpers scoped by user

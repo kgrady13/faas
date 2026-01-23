@@ -1,6 +1,7 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { getSession, setSession } from "@/lib/session-store";
 import { createSandbox } from "@/lib/sandbox";
+import { jsonSuccess, jsonError } from "@/lib/api-response";
 
 export async function POST(request: NextRequest) {
   try {
@@ -14,10 +15,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (!snapshotId) {
-      return NextResponse.json(
-        { success: false, error: "No snapshot available to restore" },
-        { status: 400 }
-      );
+      return jsonError("No snapshot available to restore", 400);
     }
 
     // Create sandbox from snapshot
@@ -33,8 +31,7 @@ export async function POST(request: NextRequest) {
 
     setSession(session);
 
-    return NextResponse.json({
-      success: true,
+    return jsonSuccess({
       session: {
         ...session,
         remainingTime: Math.max(0, session.timeout - Date.now()),
@@ -43,12 +40,9 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     console.error("Failed to restore snapshot:", error);
-    return NextResponse.json(
-      {
-        success: false,
-        error: error instanceof Error ? error.message : "Failed to restore snapshot",
-      },
-      { status: 500 }
+    return jsonError(
+      error instanceof Error ? error.message : "Failed to restore snapshot",
+      500
     );
   }
 }
