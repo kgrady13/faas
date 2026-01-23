@@ -810,6 +810,7 @@ export default function Playground() {
                 size="sm"
                 onClick={saveSnapshot}
                 disabled={loading !== null}
+                className="bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100 hover:text-amber-800"
               >
                 {loading === "snapshot" ? "Pausing..." : "Pause"}
               </Button>
@@ -818,7 +819,7 @@ export default function Playground() {
                 size="sm"
                 onClick={stopSandbox}
                 disabled={loading !== null}
-                className="text-destructive hover:text-destructive"
+                className="bg-red-50 text-destructive border-red-200 hover:bg-red-100 hover:text-destructive"
               >
                 {loading === "stop" ? "Stopping..." : "Stop"}
               </Button>
@@ -831,6 +832,7 @@ export default function Playground() {
                 size="sm"
                 onClick={restoreSnapshot}
                 disabled={loading !== null}
+                className="bg-emerald-50 text-emerald-600 border-emerald-300 hover:bg-emerald-100 hover:text-emerald-700"
               >
                 {loading === "restore" ? "Resuming..." : "Resume"}
               </Button>
@@ -839,7 +841,7 @@ export default function Playground() {
                 size="sm"
                 onClick={stopSandbox}
                 disabled={loading !== null}
-                className="text-destructive hover:text-destructive"
+                className="bg-red-50 text-destructive border-red-200 hover:bg-red-100 hover:text-destructive"
               >
                 {loading === "stop" ? "Stopping..." : "Stop"}
               </Button>
@@ -853,7 +855,7 @@ export default function Playground() {
       <main className="flex-1 flex min-h-0">
         {/* Code Editor */}
         <div className="w-1/2 border-r border-border flex flex-col min-h-0">
-          <div className="shrink-0 px-3 py-2 border-b border-border text-sm text-muted-foreground flex items-center justify-between">
+          <div className="shrink-0 px-3 py-2 text-sm text-muted-foreground flex items-center justify-between">
             <span>Code Editor</span>
             <Button
               variant="ghost"
@@ -1028,7 +1030,7 @@ export default function Playground() {
       </main>
 
       {/* Footer Actions */}
-      <footer className="shrink-0 border-t border-border px-4 py-3 flex items-center gap-2">
+      <footer className="shrink-0 border-t border-border px-4 py-3 flex flex-nowrap items-center gap-2 overflow-x-auto bg-background relative z-10">
         <Button
           variant="outline"
           onClick={createSession}
