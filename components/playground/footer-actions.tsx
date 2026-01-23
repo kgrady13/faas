@@ -1,6 +1,7 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -132,7 +133,9 @@ export function FooterActions({
               onSelect={(e) => e.preventDefault()}
               className="text-xs whitespace-nowrap"
             >
-              <span className="font-mono mr-2 text-emerald-500">{region.value}</span>
+              <Badge className="font-mono mr-1 py-0 px-1">
+                {region.value}
+              </Badge>
               {region.label}
             </DropdownMenuCheckboxItem>
           ))}

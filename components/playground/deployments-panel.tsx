@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Clock, Copy, MoreVertical } from "lucide-react";
 import type { DeploymentState } from "@/hooks";
+import { Shimmer } from "@/components/ai-elements/shimmer";
 
 interface DeploymentsPanelProps {
   deployments: DeploymentState[];
@@ -33,7 +34,7 @@ function getDeploymentStatusBadge(status: DeploymentState["status"]) {
 
   return (
     <Badge variant={variants[status]} className="text-xs">
-      {status}
+      {status === "building" ? <Shimmer>building</Shimmer> : status}
     </Badge>
   );
 }
