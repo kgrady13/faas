@@ -1,7 +1,7 @@
 import { getAllDeployments } from "@/lib/deployments-store";
 
 export async function GET() {
-  const deployments = getAllDeployments();
+  const deployments = await getAllDeployments();
 
   return new Response(
     JSON.stringify({
@@ -14,7 +14,7 @@ export async function GET() {
         status: d.status,
         cronSchedule: d.cronSchedule,
         regions: d.regions,
-        createdAt: d.createdAt.toISOString(),
+        createdAt: d.createdAt,
         errorMessage: d.errorMessage,
       })),
     }),

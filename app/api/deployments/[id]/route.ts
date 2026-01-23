@@ -7,7 +7,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const deployment = getDeployment(id);
+  const deployment = await getDeployment(id);
 
   if (!deployment) {
     return new Response(
@@ -26,7 +26,7 @@ export async function GET(
         functionUrl: `${deployment.url}/api/${deployment.functionName}`,
         status: deployment.status,
         cronSchedule: deployment.cronSchedule,
-        createdAt: deployment.createdAt.toISOString(),
+        createdAt: deployment.createdAt,
         errorMessage: deployment.errorMessage,
       },
     }),
@@ -39,7 +39,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const deployment = getDeployment(id);
+  const deployment = await getDeployment(id);
 
   if (!deployment) {
     return new Response(
@@ -56,8 +56,8 @@ export async function DELETE(
     console.warn(`Failed to delete deployment from Vercel: ${error}`);
   }
 
-  // Delete from local store
-  deleteDeployment(id);
+  // Delete from Redis store
+  await deleteDeployment(id);
 
   return new Response(
     JSON.stringify({ success: true }),

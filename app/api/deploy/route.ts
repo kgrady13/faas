@@ -105,7 +105,7 @@ export async function POST(request: NextRequest) {
           id: deploymentResult.id,
           url: deploymentResult.url,
           functionName,
-          createdAt: new Date(),
+          createdAt: new Date().toISOString(),
           status: deploymentResult.readyState === "READY" ? "ready" :
                   deploymentResult.readyState === "ERROR" ? "error" :
                   deploymentResult.readyState === "QUEUED" ? "queued" : "building",
@@ -114,7 +114,7 @@ export async function POST(request: NextRequest) {
           errorMessage: deploymentResult.errorMessage,
         };
 
-        addDeployment(deployment);
+        await addDeployment(deployment);
 
         // If deployment is not ready yet, poll for status
         if (deployment.status === "building" || deployment.status === "queued") {
@@ -195,7 +195,7 @@ async function pollDeploymentStatus(deploymentId: string) {
       if (status.regions && status.regions.length > 0) {
         updates.regions = status.regions;
       }
-      updateDeployment(deploymentId, updates);
+      await updateDeployment(deploymentId, updates);
 
       // Stop polling if deployment is done
       if (newStatus === 'ready' || newStatus === 'error' || newStatus === 'canceled') {
