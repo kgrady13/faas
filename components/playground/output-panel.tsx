@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import Ansi from "ansi-to-react";
 import { Button } from "@/components/ui/button";
 import type { Output } from "@/lib/types";
+import { RotatingText } from "@/components/shadcnio/rotating-text";
 
 interface OutputPanelProps {
   outputs: Output[];
@@ -33,18 +34,17 @@ export function OutputPanel({ outputs, onClear }: OutputPanelProps) {
         className="flex-1 min-h-0 p-4 font-mono text-sm overflow-auto bg-muted/30"
       >
         {outputs.length === 0 ? (
-          <span className="text-muted-foreground">Output will appear here...</span>
+          <RotatingText text={["Go on...try something new", "Output will appear here..."]} />
         ) : (
           outputs.map((output, i) => (
             <div
               key={i}
-              className={`whitespace-pre-wrap ${
-                output.type === "stderr"
-                  ? "text-destructive"
-                  : output.type === "system"
-                    ? "text-primary"
-                    : "text-foreground"
-              }`}
+              className={`whitespace-pre-wrap ${output.type === "stderr"
+                ? "text-destructive"
+                : output.type === "system"
+                  ? "text-primary"
+                  : "text-foreground"
+                }`}
             >
               {output.type === "system" ? (
                 `> ${output.content}`

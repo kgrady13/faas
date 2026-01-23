@@ -110,6 +110,7 @@ export function PlaygroundHeader({
     <header className="shrink-0 border-b border-border px-4 py-3 flex items-center justify-between">
       <h1 className="text-lg font-semibold">Sandbox FaaS</h1>
       <div className="flex items-center gap-3 relative">
+        {getStatusBadge()}
         {/* Dev Tools Button */}
         <button
           ref={buttonRef}
@@ -136,8 +137,6 @@ export function PlaygroundHeader({
             className={`absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-background ${getStatusColor()}`}
           />
         </button>
-
-        {getStatusBadge()}
 
         {/* Dev Tools Popover */}
         {isDevToolsOpen && (
@@ -183,8 +182,8 @@ export function PlaygroundHeader({
                       session?.status === "running"
                         ? "border-emerald-500 text-emerald-600 dark:text-emerald-400"
                         : session?.status === "paused"
-                        ? "border-yellow-500 text-yellow-600 dark:text-yellow-400"
-                        : ""
+                          ? "border-yellow-500 text-yellow-600 dark:text-yellow-400"
+                          : ""
                     }
                   >
                     {getStatusText()}
@@ -289,6 +288,9 @@ export function PlaygroundHeader({
             </div>
           </div>
         )}
+
+
+
       </div>
     </header>
   );
