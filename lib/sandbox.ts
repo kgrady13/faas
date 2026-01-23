@@ -143,41 +143,31 @@ export function setActiveSandbox(sandbox: Sandbox | null): void {
   activeSandbox = sandbox;
 }
 
-// Build-related helpers for esbuild bundling
+// Build-related helpers for Bun bundling
 
 /**
- * Install esbuild in the sandbox if not already installed
- * Uses /tmp/build-tools to avoid polluting user's working directory
+ * Install Bun in the sandbox if not already installed
+ * Uses the official Bun install script via curl
  */
-export async function installEsbuild(sandboxId: string): Promise<{ success: boolean; logs: string[] }> {
+export async function installBun(sandboxId: string): Promise<{ success: boolean; logs: string[] }> {
   const sandbox = await getOrReconnectSandbox(sandboxId);
   const logs: string[] = [];
 
-  // Use /tmp/build-tools to keep build tools separate from user code
-  const buildToolsDir = '/tmp/build-tools';
-
-  // Check if esbuild is already installed
-  const checkResult = await sandbox.runCommand('ls', [`${buildToolsDir}/node_modules/esbuild`]);
+  // Check if Bun is already installed
+  const checkResult = await sandbox.runCommand('which', ['bun']);
 
   if (checkResult.exitCode === 0) {
-    logs.push('esbuild already installed');
+    const bunPath = await checkResult.stdout();
+    logs.push(`Bun already installed at ${bunPath.trim()}`);
     return { success: true, logs };
   }
 
-  // Create build tools directory
-  await sandbox.runCommand('mkdir', ['-p', buildToolsDir]);
-
-  // Initialize npm in the build tools directory
-  const initResult = await sandbox.runCommand('sh', ['-c', `cd ${buildToolsDir} && npm init -y`]);
-
-  if (initResult.exitCode !== 0) {
-    const stderr = await initResult.stderr();
-    logs.push(`npm init failed: ${stderr}`);
-  }
-
-  // Install esbuild in the build tools directory
-  logs.push('Installing esbuild...');
-  const installResult = await sandbox.runCommand('sh', ['-c', `cd ${buildToolsDir} && npm install esbuild`]);
+  // Install Bun using official install script (faster and more reliable than npm)
+  logs.push('Installing Bun...');
+  const installResult = await sandbox.runCommand('sh', [
+    '-c',
+    'curl -fsSL https://bun.sh/install | bash && export BUN_INSTALL="$HOME/.bun" && export PATH="$BUN_INSTALL/bin:$PATH"',
+  ]);
 
   const stdout = await installResult.stdout();
   const stderr = await installResult.stderr();
@@ -192,7 +182,8 @@ export async function installEsbuild(sandboxId: string): Promise<{ success: bool
 }
 
 /**
- * Build/bundle user code using esbuild in the sandbox
+ * Build/bundle user code using Bun in the sandbox
+ * Bun handles TypeScript natively and produces ESM output for Bun runtime
  */
 export async function* buildCode(
   code: string,
@@ -213,26 +204,29 @@ export async function* buildCode(
 
   yield { type: 'log', data: 'Source code written to /tmp/src/handler.ts' };
 
-  // Install esbuild if needed
-  yield { type: 'log', data: 'Checking esbuild installation...' };
-  const installResult = await installEsbuild(sandboxId);
+  // Install Bun if needed
+  yield { type: 'log', data: 'Checking Bun installation...' };
+  const installResult = await installBun(sandboxId);
   for (const log of installResult.logs) {
     yield { type: 'log', data: log };
   }
 
   if (!installResult.success) {
-    yield { type: 'error', data: 'Failed to install esbuild' };
+    yield { type: 'error', data: 'Failed to install Bun' };
     return;
   }
 
-  // Run esbuild to bundle the code (using esbuild from /tmp/build-tools)
-  yield { type: 'log', data: 'Running esbuild...' };
+  // Run Bun build to bundle the code
+  // --target=bun: Optimizes for Bun runtime (default ESM output)
+  // Bun handles TypeScript natively - no transpilation step needed
+  yield { type: 'log', data: 'Running bun build...' };
 
+  // Use full path to bun since curl installs to ~/.bun/bin
   const buildCommand = await sandbox.runCommand({
     cmd: 'sh',
     args: [
       '-c',
-      '/tmp/build-tools/node_modules/.bin/esbuild /tmp/src/handler.ts --bundle --platform=node --target=node22 --format=cjs --outfile=/tmp/dist/index.js',
+      'export PATH="$HOME/.bun/bin:$PATH" && bun build /tmp/src/handler.ts --outfile=/tmp/dist/index.js --target=bun',
     ],
     detached: true,
   });

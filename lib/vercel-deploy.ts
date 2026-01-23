@@ -68,73 +68,8 @@ async function uploadFile(token: string, teamId: string | undefined, content: st
 }
 
 /**
- * Wrap a Web Standard handler for Node.js runtime compatibility
- */
-function wrapHandlerForNodejs(bundledCode: string): string {
-  // The bundled code (CJS) exports the handler as default
-  // We wrap it for Node.js (req, res) format
-  return `
-// Import the bundled handler
-const handlerModule = (() => {
-  const module = { exports: {} };
-  const exports = module.exports;
-  ${bundledCode}
-  return module.exports;
-})();
-
-// Get the handler (handle both default export styles)
-const handler = handlerModule.default || handlerModule;
-
-// Node.js wrapper for Vercel runtime
-module.exports = async (req, res) => {
-  try {
-    // Build full URL from Node.js request
-    const protocol = req.headers['x-forwarded-proto'] || 'https';
-    const host = req.headers['x-forwarded-host'] || req.headers.host || 'localhost';
-    const url = \`\${protocol}://\${host}\${req.url}\`;
-
-    // Collect body for non-GET requests
-    let body = null;
-    if (req.method !== 'GET' && req.method !== 'HEAD') {
-      const chunks = [];
-      for await (const chunk of req) {
-        chunks.push(chunk);
-      }
-      if (chunks.length > 0) {
-        body = Buffer.concat(chunks);
-      }
-    }
-
-    // Convert to Web Standard Request
-    const webRequest = new Request(url, {
-      method: req.method,
-      headers: req.headers,
-      body: body,
-      duplex: 'half',
-    });
-
-    // Call the Web Standard handler
-    const webResponse = await handler(webRequest);
-
-    // Convert Web Standard Response to Node.js response
-    res.statusCode = webResponse.status;
-    webResponse.headers.forEach((value, key) => {
-      res.setHeader(key, value);
-    });
-
-    const responseBody = await webResponse.arrayBuffer();
-    res.end(Buffer.from(responseBody));
-  } catch (error) {
-    console.error('Handler error:', error);
-    res.statusCode = 500;
-    res.end(JSON.stringify({ error: error.message }));
-  }
-};
-`;
-}
-
-/**
  * Generate Build Output API structure for a serverless function
+ * Uses Bun runtime which supports Web Standard handlers natively
  */
 export function generateBuildOutput(
   bundledCode: string,
@@ -142,9 +77,6 @@ export function generateBuildOutput(
   cronSchedule?: string
 ): VercelFile[] {
   const files: VercelFile[] = [];
-
-  // Wrap the Web Standard handler for Node.js runtime
-  const wrappedCode = wrapHandlerForNodejs(bundledCode);
 
   // config.json - routes and optional cron
   const config: {
@@ -165,11 +97,11 @@ export function generateBuildOutput(
     data: JSON.stringify(config, null, 2),
   });
 
-  // .vc-config.json - function configuration for Node.js
+  // .vc-config.json - function configuration for Bun runtime
+  // Bun supports Web Standard Request/Response natively - no wrapper needed
   const vcConfig = {
-    runtime: 'nodejs24.x',
+    runtime: 'bun1.x',
     handler: 'index.js',
-    launcherType: 'Nodejs',
     supportsResponseStreaming: true,
   };
 
@@ -178,10 +110,10 @@ export function generateBuildOutput(
     data: JSON.stringify(vcConfig, null, 2),
   });
 
-  // index.js - wrapped handler code (CommonJS for Node.js runtime)
+  // index.js - bundled handler code (ESM for Bun runtime, no wrapper needed)
   files.push({
     file: `.vercel/output/functions/api/${functionName}.func/index.js`,
-    data: wrappedCode,
+    data: bundledCode,
   });
 
   return files;

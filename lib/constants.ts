@@ -53,40 +53,43 @@ export const REGION_OPTIONS: RegionOption[] = [
 
 /**
  * Default code template for new sessions
+ * Uses Bun-style handler format for Vercel Bun runtime
  */
-export const DEFAULT_CODE = `// Web Standard Function Handler
-// Click "Run" to test, "Deploy" for Vercel Fluid Compute
+export const DEFAULT_CODE = `// Bun Handler for Vercel Fluid Compute
+// Click "Run" to test, "Deploy" for Vercel Bun runtime
 
 console.log("Hello World");
 
-export default async function handler(req: Request): Promise<Response> {
-  // Use base URL for relative paths (Vercel passes relative URLs)
-  const url = new URL(req.url, "http://localhost");
+export default {
+  async fetch(request: Request): Promise<Response> {
+    // Use base URL for relative paths (Vercel passes relative URLs)
+    const url = new URL(request.url, "http://localhost");
 
-  console.log("Hello From Handler");
+    console.log("Hello From Handler");
 
-  if (req.method === "GET") {
-    return new Response(JSON.stringify({
-      message: "Hello from Vercel Fluid Compute!",
-      timestamp: new Date().toISOString(),
-      path: url.pathname,
-    }), {
-      headers: { "Content-Type": "application/json" }
-    });
+    if (request.method === "GET") {
+      return new Response(JSON.stringify({
+        message: "Hello from Vercel Fluid Compute!",
+        timestamp: new Date().toISOString(),
+        path: url.pathname,
+      }), {
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+
+    if (request.method === "POST") {
+      const body = await request.json();
+      return new Response(JSON.stringify({
+        received: body,
+        processed: true,
+      }), {
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+
+    return new Response("Method not allowed", { status: 405 });
   }
-
-  if (req.method === "POST") {
-    const body = await req.json();
-    return new Response(JSON.stringify({
-      received: body,
-      processed: true,
-    }), {
-      headers: { "Content-Type": "application/json" }
-    });
-  }
-
-  return new Response("Method not allowed", { status: 405 });
-}
+};
 `;
 
 /**
