@@ -40,7 +40,7 @@ export default function Playground() {
   // Local UI state
   const [code, setCode] = useState(DEFAULT_CODE);
   const [outputs, setOutputs] = useState<Output[]>([]);
-  const [cronSchedule, setCronSchedule] = useState("");
+  const [cronSchedule, setCronSchedule] = useState("* * * * *");
   const [regions, setRegions] = useState<string[]>(["iad1"]);
   const [inspectedDeployment, setInspectedDeployment] = useState<DeploymentState | null>(
     null
