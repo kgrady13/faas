@@ -13,7 +13,7 @@ const Editor = dynamic(
     ssr: false,
     loading: () => (
       <div className="h-full flex items-center justify-center">
-        <Shimmer>Something is happening...</Shimmer>
+        <Shimmer>Things are happening...</Shimmer>
       </div>
     ),
   }

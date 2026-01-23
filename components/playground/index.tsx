@@ -243,6 +243,7 @@ export default function Playground() {
         onPause={handlePause}
         onResume={handleResume}
         onStop={handleStop}
+        onRestart={handleCreateSession}
       />
 
       <main className="flex-1 flex min-h-0">
