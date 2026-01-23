@@ -1,7 +1,9 @@
-import { getAllDeployments } from "@/lib/deployments-store";
+import { NextRequest } from "next/server";
+import { getAllDeployments, getUserId } from "@/lib/deployments-store";
 
-export async function GET() {
-  const deployments = await getAllDeployments();
+export async function GET(request: NextRequest) {
+  const userId = getUserId(request);
+  const deployments = await getAllDeployments(userId);
 
   return new Response(
     JSON.stringify({

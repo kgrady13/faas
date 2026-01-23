@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { getDeployment } from "@/lib/deployments-store";
+import { getDeployment, getUserId } from "@/lib/deployments-store";
 import { streamDeploymentLogs } from "@/lib/vercel-deploy";
 
 export async function GET(
@@ -7,7 +7,8 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const deployment = await getDeployment(id);
+  const userId = getUserId(request);
+  const deployment = await getDeployment(userId, id);
 
   if (!deployment) {
     return new Response(

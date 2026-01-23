@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { getDeployment, deleteDeployment } from "@/lib/deployments-store";
+import { getDeployment, deleteDeployment, getUserId } from "@/lib/deployments-store";
 import { deleteVercelDeployment } from "@/lib/vercel-deploy";
 
 export async function GET(
@@ -7,7 +7,8 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const deployment = await getDeployment(id);
+  const userId = getUserId(request);
+  const deployment = await getDeployment(userId, id);
 
   if (!deployment) {
     return new Response(
@@ -39,7 +40,8 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const deployment = await getDeployment(id);
+  const userId = getUserId(request);
+  const deployment = await getDeployment(userId, id);
 
   if (!deployment) {
     return new Response(
@@ -57,7 +59,7 @@ export async function DELETE(
   }
 
   // Delete from Redis store
-  await deleteDeployment(id);
+  await deleteDeployment(userId, id);
 
   return new Response(
     JSON.stringify({ success: true }),

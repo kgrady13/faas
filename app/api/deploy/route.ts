@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { getSession, updateSession } from "@/lib/session-store";
 import { buildCode, createSnapshot } from "@/lib/sandbox";
 import { generateBuildOutput, createDeployment, getDeploymentStatus } from "@/lib/vercel-deploy";
-import { addDeployment, updateDeployment, type Deployment } from "@/lib/deployments-store";
+import { addDeployment, updateDeployment, getUserId, type Deployment } from "@/lib/deployments-store";
 
 export async function POST(request: NextRequest) {
   const body = await request.json();
@@ -15,6 +15,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  const userId = getUserId(request);
   const session = getSession();
 
   if (!session || !session.sandboxId) {
@@ -114,11 +115,11 @@ export async function POST(request: NextRequest) {
           errorMessage: deploymentResult.errorMessage,
         };
 
-        await addDeployment(deployment);
+        await addDeployment(userId, deployment);
 
         // If deployment is not ready yet, poll for status
         if (deployment.status === "building" || deployment.status === "queued") {
-          pollDeploymentStatus(deployment.id);
+          pollDeploymentStatus(userId, deployment.id);
         }
 
         emit("log", `Deployment started: ${deployment.id}`);
@@ -170,7 +171,7 @@ export async function POST(request: NextRequest) {
 /**
  * Poll deployment status until it's ready or fails
  */
-async function pollDeploymentStatus(deploymentId: string) {
+async function pollDeploymentStatus(userId: string, deploymentId: string) {
   const maxAttempts = 60; // 5 minutes max
   let attempts = 0;
 
@@ -195,7 +196,7 @@ async function pollDeploymentStatus(deploymentId: string) {
       if (status.regions && status.regions.length > 0) {
         updates.regions = status.regions;
       }
-      await updateDeployment(deploymentId, updates);
+      await updateDeployment(userId, deploymentId, updates);
 
       // Stop polling if deployment is done
       if (newStatus === 'ready' || newStatus === 'error' || newStatus === 'canceled') {
