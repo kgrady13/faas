@@ -40,6 +40,7 @@ export function CodeEditorPanel({ code, onChange, onFormat }: CodeEditorPanelPro
         value={code}
         onChange={(value) => onChange(value || "")}
         theme="light"
+        loading={null}
         options={{
           minimap: { enabled: false },
           fontSize: 14,
