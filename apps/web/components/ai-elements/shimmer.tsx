@@ -5,31 +5,48 @@ import { motion } from "motion/react";
 import {
   type CSSProperties,
   type ElementType,
+  type JSX,
   memo,
   useMemo,
 } from "react";
 
-export type TextShimmerProps = {
+export interface TextShimmerProps {
   children: string;
   as?: ElementType;
   className?: string;
   duration?: number;
   spread?: number;
-};
+}
+
+// Pre-create common motion components outside render
+const motionComponents = new Map<ElementType, ReturnType<typeof motion.create>>();
+
+function getMotionComponent(Component: ElementType) {
+  if (!motionComponents.has(Component)) {
+    motionComponents.set(
+      Component,
+      motion.create(Component as keyof JSX.IntrinsicElements)
+    );
+  }
+  return motionComponents.get(Component)!;
+}
 
 const ShimmerComponent = ({
   children,
+  as: Component = "p",
   className,
   duration = 2,
   spread = 2,
 }: TextShimmerProps) => {
+  const MotionComponent = getMotionComponent(Component);
+
   const dynamicSpread = useMemo(
     () => (children?.length ?? 0) * spread,
     [children, spread]
   );
 
   return (
-    <motion.p
+    <MotionComponent
       animate={{ backgroundPosition: "0% center" }}
       className={cn(
         "relative inline-block bg-size-[250%_100%,auto] bg-clip-text text-transparent",
@@ -51,7 +68,7 @@ const ShimmerComponent = ({
       }}
     >
       {children}
-    </motion.p>
+    </MotionComponent>
   );
 };
 

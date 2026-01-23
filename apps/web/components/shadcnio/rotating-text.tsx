@@ -5,6 +5,7 @@ export const title = "Rotating Text"
 import { AnimatePresence, type HTMLMotionProps, motion, type Transition } from "motion/react"
 import * as React from "react"
 import { cn } from "@/lib/utils"
+import { Shimmer } from "../ai-elements/shimmer"
 
 type RotatingTextProps = {
     text: string | string[]
@@ -47,7 +48,9 @@ function RotatingText({
                     transition={transition}
                     {...(props as any)}
                 >
-                    {currentText}
+                    <Shimmer>
+                        {currentText}
+                    </Shimmer>
                 </motion.div>
             </AnimatePresence>
         </div>
