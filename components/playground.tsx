@@ -166,6 +166,45 @@ export default function Playground() {
   const logsAbortControllerRef = useRef<AbortController | null>(null);
   const outputRef = useRef<HTMLDivElement>(null);
 
+  // Keyboard shortcuts (no modifier, disabled when typing in editor/inputs)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Skip if user is typing in an input, textarea, or the Monaco editor
+      const target = e.target as HTMLElement;
+      const isEditing =
+        target.tagName === "INPUT" ||
+        target.tagName === "TEXTAREA" ||
+        target.closest(".monaco-editor") !== null ||
+        target.isContentEditable;
+
+      if (isEditing) return;
+
+      switch (e.key.toLowerCase()) {
+        case "n":
+          e.preventDefault();
+          if (loading === null) {
+            createSession();
+          }
+          break;
+        case "r":
+          e.preventDefault();
+          if (loading === null && session?.status === "running") {
+            runCode();
+          }
+          break;
+        case "d":
+          e.preventDefault();
+          if (loading === null && session?.status === "running") {
+            deployCode();
+          }
+          break;
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [loading, session?.status]);
+
   // Auto-scroll to bottom when new output arrives
   useEffect(() => {
     if (outputRef.current) {
@@ -988,15 +1027,23 @@ export default function Playground() {
           variant="outline"
           onClick={createSession}
           disabled={loading !== null}
+          className="gap-2"
         >
           {loading === "create" ? "Creating..." : "New Session"}
+          <kbd className="inline-flex h-5 max-h-full items-center rounded bg-black/10 dark:bg-white/10 px-1.5 font-[inherit] text-[0.625rem] ring-1 ring-black/10 dark:ring-white/20 ring-inset">
+            N
+          </kbd>
         </Button>
 
         <Button
           onClick={runCode}
           disabled={loading !== null || session?.status !== "running"}
+          className="gap-2"
         >
           {loading === "run" ? "Running..." : "Run"}
+          <kbd className="inline-flex h-5 max-h-full items-center rounded bg-white/15 px-1.5 font-[inherit] text-[0.625rem] ring-1 ring-white/20 ring-inset">
+            R
+          </kbd>
         </Button>
 
         <div className="w-px h-6 bg-border mx-1" />
@@ -1004,8 +1051,12 @@ export default function Playground() {
         <Button
           onClick={deployCode}
           disabled={loading !== null || session?.status !== "running"}
+          className="gap-2"
         >
           {loading === "deploy" ? "Deploying..." : "Deploy"}
+          <kbd className="inline-flex h-5 max-h-full items-center rounded bg-white/15 px-1.5 font-[inherit] text-[0.625rem] ring-1 ring-white/20 ring-inset">
+            D
+          </kbd>
         </Button>
 
         <Combobox value={cronSchedule} onValueChange={(value) => setCronSchedule(value ?? "")}>
