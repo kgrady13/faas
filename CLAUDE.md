@@ -4,6 +4,26 @@
 
 This is a white-labeled FaaS platform allowing users to write, test, and deploy serverless functions. It uses Vercel Sandbox for development/testing and Vercel Serverless Functions for production deployment.
 
+## Tech Stack
+
+- **Framework**: Next.js 16.1.4 with React 19.2.3
+- **Styling**: Tailwind CSS 4 (via @tailwindcss/postcss)
+- **UI Components**: Shadcn/ui + Radix UI + Base UI
+- **Code Editor**: Monaco Editor (@monaco-editor/react)
+- **Animations**: Motion 12.x
+- **Storage**: Upstash Redis for deployment metadata
+- **Sandbox**: @vercel/sandbox SDK with Node.js 24 runtime
+- **Package Manager**: Bun
+
+## Commands
+
+```bash
+bun dev           # Start development server
+bun run build     # Production build
+bun tsc --noEmit  # Type check
+bun lint          # Run ESLint
+```
+
 ## Key Implementation Details
 
 ### Sandbox Execution
@@ -17,12 +37,21 @@ This is a white-labeled FaaS platform allowing users to write, test, and deploy 
 
 - In-memory storage using `globalThis` to persist across hot reloads in Next.js dev mode
 - Without `globalThis`, module-level variables get reset between API requests in Turbopack
+- Sessions track: `sandboxId`, `status`, `timeout`, `snapshotId`, `createdAt`
+- Session timeout auto-extends by 2 minutes on successful run/build operations
+
+### Deployment Store
+
+- Deployments persisted in **Upstash Redis** (not in-memory)
+- User isolation via IP address extracted from `x-forwarded-for` header
+- Deployments include: id, url, functionName, createdAt, status, cronSchedule, regions, errorMessage, buildLogs
 
 ### Build Process (esbuild)
 
-- esbuild installed on-demand in sandbox via `npm install esbuild`
+- esbuild installed on-demand **inside the sandbox** via `npm install esbuild` (intentionally npm, not bun, since it runs in the sandbox environment)
 - **Must use CommonJS format** (`--format=cjs`) for Vercel Node.js runtime compatibility
 - ESM format causes issues with the handler wrapping approach
+- Output path: `/tmp/dist/index.js`
 
 ### Vercel Deployment (Critical Details)
 
@@ -75,12 +104,43 @@ module.exports = async (req, res) => {
 
 5. **Function timeout (300s)**: Vercel runtime not recognizing handler format → Fixed by wrapping Web Standard handler for Node.js
 
-### Environment Variables
+## Code Patterns
 
-```
-VERCEL_API_TOKEN         # Required - Vercel API token
-VERCEL_WORKER_PROJECT_ID # Required - Target project for deployments
-VERCEL_TEAM_ID           # Optional - Team scope for API calls
+### API Response Pattern
+
+Standardized responses via `lib/api-response.ts`:
+- `jsonSuccess(data)` / `jsonError(message, status)` - NextResponse builders
+- `sseResponse(stream)` - SSE streaming responses
+- All responses follow `{ success: true/false, ... }` structure
+
+### Session Validation
+
+Centralized in `lib/session-validation.ts`:
+- `validateActiveSession()` returns discriminated union
+- Success branch includes session data, failure branch includes error Response
+- Checks: session exists, not expired, not paused
+
+### Type System
+
+Discriminated union patterns in `lib/types.ts`:
+- `ApiResponse<T> = ApiSuccessResponse<T> | ApiErrorResponse`
+- SSE events typed with `SSEEventType` and `SSEEvent<T>`
+- Runtime logs include context: requestMethod, requestPath, responseStatusCode
+
+## Environment Variables
+
+```bash
+# Required - Vercel Deployment
+VERCEL_API_TOKEN         # Vercel API token
+VERCEL_WORKER_PROJECT_ID # Target project for deployments
+
+# Required - Redis Storage
+KV_REST_API_URL          # Upstash Redis endpoint
+KV_REST_API_TOKEN        # Upstash authentication token
+
+# Optional
+VERCEL_TEAM_ID           # Team scope for API calls
+VERCEL_OIDC_TOKEN        # Secure OIDC authentication
 ```
 
 ## File Structure
@@ -88,32 +148,48 @@ VERCEL_TEAM_ID           # Optional - Team scope for API calls
 ```
 app/
 ├── api/
-│   ├── session/route.ts     # Session CRUD
-│   ├── run/route.ts         # Execute code (SSE)
-│   ├── build/route.ts       # esbuild bundling (SSE)
-│   ├── deploy/route.ts      # Vercel deployment
+│   ├── session/route.ts        # Session CRUD
+│   ├── run/route.ts            # Execute code (SSE)
+│   ├── build/route.ts          # esbuild bundling (SSE)
+│   ├── deploy/route.ts         # Vercel deployment (SSE)
+│   ├── stop/route.ts           # Stop running execution
 │   ├── deployments/
-│   │   ├── route.ts         # List deployments
-│   │   └── [id]/route.ts    # Get/delete deployment
-│   ├── snapshot/route.ts    # Create snapshot
-│   └── restore/route.ts     # Restore snapshot
-├── page.tsx                 # Renders Playground
+│   │   ├── route.ts            # List deployments
+│   │   └── [id]/
+│   │       ├── route.ts        # Get/delete deployment
+│   │       └── logs/route.ts   # Get deployment logs
+│   ├── snapshot/route.ts       # Create snapshot
+│   └── restore/route.ts        # Restore snapshot
+├── page.tsx                    # Renders Playground
 └── layout.tsx
 
 components/
-└── playground.tsx           # Main UI (editor, output, deployments panel)
+├── playground/
+│   ├── index.tsx               # Main playground container
+│   ├── code-editor-panel.tsx   # Monaco editor wrapper
+│   ├── output-panel.tsx        # Execution output display
+│   ├── deployments-panel.tsx   # Deployments list
+│   └── footer-actions.tsx      # Action buttons
+└── ui/                         # Shadcn/ui components
+
+hooks/
+├── index.ts                    # Barrel exports
+├── use-session.ts              # Session state management
+├── use-deployments.ts          # Deployments CRUD
+├── use-code-execution.ts       # Run/build operations
+├── use-keyboard-shortcuts.ts   # Hotkey bindings
+└── use-runtime-logs.ts         # Live log streaming
 
 lib/
-├── sandbox.ts               # Sandbox SDK wrapper
-├── session-store.ts         # Session state (globalThis)
-├── deployments-store.ts     # Deployments state (globalThis)
-└── vercel-deploy.ts         # Vercel API + handler wrapping
-```
-
-## Commands
-
-```bash
-npm run dev      # Start development server
-npm run build    # Production build
-npx tsc --noEmit # Type check
+├── api-response.ts             # Standardized API responses
+├── constants.ts                # Cron presets, regions, defaults
+├── deployments-store.ts        # Redis deployment operations
+├── format.ts                   # Time/log formatting utilities
+├── redis.ts                    # Upstash Redis client
+├── sandbox.ts                  # Sandbox SDK wrapper
+├── session-store.ts            # Session state (globalThis)
+├── session-validation.ts       # Request validation
+├── types.ts                    # TypeScript type definitions
+├── utils.ts                    # cn(), minDelay() utilities
+└── vercel-deploy.ts            # Vercel API + handler wrapping
 ```
