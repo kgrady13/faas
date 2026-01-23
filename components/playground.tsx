@@ -9,14 +9,6 @@ import Editor from "@monaco-editor/react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
-  Combobox,
-  ComboboxInput,
-  ComboboxContent,
-  ComboboxList,
-  ComboboxItem,
-  ComboboxEmpty,
-} from "@/components/ui/combobox";
-import {
   DropdownMenu,
   DropdownMenuTrigger,
   DropdownMenuContent,
@@ -24,6 +16,8 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
 } from "@/components/ui/dropdown-menu";
 import {
   Sheet,
@@ -166,44 +160,10 @@ export default function Playground() {
   const logsAbortControllerRef = useRef<AbortController | null>(null);
   const outputRef = useRef<HTMLDivElement>(null);
 
-  // Keyboard shortcuts (no modifier, disabled when typing in editor/inputs)
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Skip if user is typing in an input, textarea, or the Monaco editor
-      const target = e.target as HTMLElement;
-      const isEditing =
-        target.tagName === "INPUT" ||
-        target.tagName === "TEXTAREA" ||
-        target.closest(".monaco-editor") !== null ||
-        target.isContentEditable;
-
-      if (isEditing) return;
-
-      switch (e.key.toLowerCase()) {
-        case "n":
-          e.preventDefault();
-          if (loading === null) {
-            createSession();
-          }
-          break;
-        case "r":
-          e.preventDefault();
-          if (loading === null && session?.status === "running") {
-            runCode();
-          }
-          break;
-        case "d":
-          e.preventDefault();
-          if (loading === null && session?.status === "running") {
-            deployCode();
-          }
-          break;
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [loading, session?.status]);
+  // Refs for keyboard shortcut handlers (to avoid stale closures)
+  const createSessionRef = useRef<() => void>(() => {});
+  const runCodeRef = useRef<() => void>(() => {});
+  const deployCodeRef = useRef<() => void>(() => {});
 
   // Auto-scroll to bottom when new output arrives
   useEffect(() => {
@@ -461,6 +421,52 @@ export default function Playground() {
       setLoading(null);
     }
   };
+
+  // Keep refs updated with latest function references
+  useEffect(() => {
+    createSessionRef.current = createSession;
+    runCodeRef.current = runCode;
+    deployCodeRef.current = deployCode;
+  });
+
+  // Keyboard shortcuts (no modifier, disabled when typing in editor/inputs)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Skip if user is typing in an input, textarea, or the Monaco editor
+      const target = e.target as HTMLElement;
+      const isEditing =
+        target.tagName === "INPUT" ||
+        target.tagName === "TEXTAREA" ||
+        target.closest(".monaco-editor") !== null ||
+        target.isContentEditable;
+
+      if (isEditing) return;
+
+      switch (e.key.toLowerCase()) {
+        case "n":
+          e.preventDefault();
+          if (loading === null) {
+            createSessionRef.current();
+          }
+          break;
+        case "r":
+          e.preventDefault();
+          if (loading === null && session?.status === "running") {
+            runCodeRef.current();
+          }
+          break;
+        case "d":
+          e.preventDefault();
+          if (loading === null && session?.status === "running") {
+            deployCodeRef.current();
+          }
+          break;
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [loading, session?.status]);
 
   const deleteDeployment = async (id: string) => {
     try {
@@ -1059,26 +1065,29 @@ export default function Playground() {
           </kbd>
         </Button>
 
-        <Combobox value={cronSchedule} onValueChange={(value) => setCronSchedule(value ?? "")}>
-          <ComboboxInput
-            placeholder="Cron schedule"
-            className="w-44 h-8 text-sm"
-          />
-          <ComboboxContent side="top" className="text-xs">
-            <ComboboxList>
-              <ComboboxEmpty className="justify-start pl-2">Custom expression</ComboboxEmpty>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" size="sm" className="gap-1.5">
+              <Clock className="size-3.5" />
+              {getCronLabel(cronSchedule) || "Cron Schedule"}
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent side="top" align="start" className="w-auto max-h-64 overflow-y-auto text-xs">
+            <DropdownMenuLabel className="text-xs">Cron schedule</DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuRadioGroup value={cronSchedule} onValueChange={setCronSchedule}>
               {CRON_PRESETS.map((preset) => (
-                <ComboboxItem
+                <DropdownMenuRadioItem
                   key={preset.value || "none"}
                   value={preset.value}
-                  className="whitespace-nowrap pr-2 text-xs **:data-[slot=combobox-item-indicator]:hidden"
+                  className="text-xs whitespace-nowrap"
                 >
                   {preset.label}
-                </ComboboxItem>
+                </DropdownMenuRadioItem>
               ))}
-            </ComboboxList>
-          </ComboboxContent>
-        </Combobox>
+            </DropdownMenuRadioGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -1109,32 +1118,6 @@ export default function Playground() {
             ))}
           </DropdownMenuContent>
         </DropdownMenu>
-
-        <div className="w-px h-6 bg-border mx-1" />
-
-        <Button
-          variant="secondary"
-          onClick={saveSnapshot}
-          disabled={loading !== null || session?.status !== "running"}
-        >
-          {loading === "snapshot" ? "Saving..." : "Pause"}
-        </Button>
-
-        <Button
-          variant="secondary"
-          onClick={restoreSnapshot}
-          disabled={loading !== null || !session?.snapshotId}
-        >
-          {loading === "restore" ? "Resuming..." : "Resume"}
-        </Button>
-
-        <Button
-          variant="destructive"
-          onClick={stopSandbox}
-          disabled={loading !== null || !session || session.status === "stopped"}
-        >
-          {loading === "stop" ? "Stopping..." : "Stop"}
-        </Button>
 
         {remainingTime > 0 && remainingTime < 60000 && session?.status === "running" && (
           <span className="ml-auto text-sm text-destructive">
