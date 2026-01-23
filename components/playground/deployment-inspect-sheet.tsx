@@ -93,21 +93,19 @@ export function DeploymentInspectSheet({
         <div className="flex border-b border-border">
           <button
             onClick={() => onTabChange("details")}
-            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
-              activeTab === "details"
-                ? "border-primary text-foreground"
-                : "border-transparent text-muted-foreground hover:text-foreground"
-            }`}
+            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${activeTab === "details"
+              ? "border-primary text-foreground"
+              : "border-transparent text-muted-foreground hover:text-foreground"
+              }`}
           >
             Details
           </button>
           <button
             onClick={() => onTabChange("logs")}
-            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
-              activeTab === "logs"
-                ? "border-primary text-foreground"
-                : "border-transparent text-muted-foreground hover:text-foreground"
-            }`}
+            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${activeTab === "logs"
+              ? "border-primary text-foreground"
+              : "border-transparent text-muted-foreground hover:text-foreground"
+              }`}
           >
             Runtime Logs
           </button>
@@ -154,7 +152,7 @@ export function DeploymentInspectSheet({
                   </code>
                 </div>
                 <div className="col-span-2">
-                  <div className="text-muted-foreground mb-1">Cron Schedule</div>
+                  <div className="text-muted-foreground mb-1">Schedule Run</div>
                   {deployment.cronSchedule ? (
                     <div className="flex items-center gap-2">
                       <code className="text-xs bg-muted px-2 py-1 rounded">

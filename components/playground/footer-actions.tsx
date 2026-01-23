@@ -81,7 +81,7 @@ export function FooterActions({
         <DropdownMenuTrigger asChild>
           <Button variant="outline" size="sm" className="gap-1.5">
             <Clock className="size-3.5" />
-            {getCronLabel(cronSchedule) || "Cron Schedule"}
+            {getCronLabel(cronSchedule) || "Schedule Run"}
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent
@@ -89,7 +89,7 @@ export function FooterActions({
           align="start"
           className="w-auto max-h-64 overflow-y-auto text-xs"
         >
-          <DropdownMenuLabel className="text-xs">Cron schedule</DropdownMenuLabel>
+          <DropdownMenuLabel className="text-xs">Schedule Run</DropdownMenuLabel>
           <DropdownMenuSeparator />
           <DropdownMenuRadioGroup value={cronSchedule} onValueChange={onCronScheduleChange}>
             {CRON_PRESETS.map((preset) => (
