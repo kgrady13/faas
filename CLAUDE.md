@@ -11,6 +11,17 @@ This is a **Turborepo monorepo** with the following apps:
 - **@faas/web** (`apps/web/`) - Next.js FaaS platform UI
 - **@faas/deployments** (`apps/deployments/`) - Vercel deployment target for user functions
 
+## Vercel Projects
+
+Two separate Vercel projects:
+
+| App                | Project Name       | Purpose                                          |
+| ------------------ | ------------------ | ------------------------------------------------ |
+| `apps/web`         | `faas`             | The FaaS platform UI where users write/test code |
+| `apps/deployments` | `faas-deployments` | Target project for deployed user functions       |
+
+The web app deploys user functions TO the `faas-deployments` project via the Vercel API.
+
 ## Tech Stack
 
 - **Monorepo**: Turborepo with Bun workspaces
@@ -20,7 +31,9 @@ This is a **Turborepo monorepo** with the following apps:
 - **Code Editor**: Monaco Editor (@monaco-editor/react)
 - **Animations**: Motion 12.x
 - **Storage**: Upstash Redis for deployment metadata
-- **Sandbox**: @vercel/sandbox SDK with Node.js 24 runtime
+- **Sandbox**: @vercel/sandbox SDK with Node.js 24 runtime (for testing)
+- **Build Tool**: Bun (installed in sandbox for bundling)
+- **Deployed Runtime**: Vercel Bun runtime (`bun1.x`)
 - **Package Manager**: Bun
 
 ## Commands
@@ -62,53 +75,42 @@ cd apps/web && bun tsc --noEmit   # Type check web app
 - User isolation via IP address extracted from `x-forwarded-for` header
 - Deployments include: id, url, functionName, createdAt, status, cronSchedule, regions, errorMessage, buildLogs
 
-### Build Process (esbuild)
+### Build Process (Bun)
 
-- esbuild installed on-demand **inside the sandbox** via `npm install esbuild` (intentionally npm, not bun, since it runs in the sandbox environment)
-- **Must use CommonJS format** (`--format=cjs`) for Vercel Node.js runtime compatibility
-- ESM format causes issues with the handler wrapping approach
+- Bun installed on-demand **inside the sandbox** via curl (`curl -fsSL https://bun.sh/install | bash`)
+- Uses `bun build` with `--target=bun` for Bun runtime compatibility
+- Bun handles TypeScript natively - no separate transpilation needed
 - Output path: `/tmp/dist/index.js`
+- Source path: `/tmp/src/handler.ts`
 
-### Vercel Deployment (Critical Details)
+### Vercel Deployment (Bun Runtime)
 
-**The biggest gotcha**: Vercel Node.js runtime does NOT natively support Web Standard `Request/Response` handlers. That's an Edge runtime feature.
-
-**Solution**: Wrap user's Web Standard handler with a Node.js adapter:
+**Key insight**: Vercel's **Bun runtime** (`bun1.x`) natively supports Web Standard `Request/Response` handlers - no wrapper needed!
 
 ```javascript
-// User writes:
-export default async function handler(req: Request): Promise<Response> { ... }
-
-// We wrap it as:
-module.exports = async (req, res) => {
-  // Convert Node.js req → Web Standard Request
-  const webRequest = new Request(url, { method, headers, body });
-
-  // Call user's handler
-  const webResponse = await handler(webRequest);
-
-  // Convert Web Standard Response → Node.js res
-  res.statusCode = webResponse.status;
-  res.end(await webResponse.arrayBuffer());
-};
+// User writes (and this deploys as-is):
+export default async function handler(req: Request): Promise<Response> {
+  return new Response('Hello World');
+}
 ```
 
 **Build Output API v3 Structure**:
 
 ```
 .vercel/output/
-├── config.json          # version: 3, routes array
+├── config.json          # version: 3, routes array, optional crons
 └── functions/api/handler.func/
-    ├── .vc-config.json  # runtime: nodejs24.x, handler: index.js, launcherType: Nodejs
-    └── index.js         # Wrapped CommonJS handler
+    ├── .vc-config.json  # runtime: bun1.x, handler: index.js
+    └── index.js         # ESM bundled handler (no wrapper)
 ```
 
 **Important .vc-config.json settings**:
 
-- `runtime`: `nodejs24.x` (or nodejs22.x)
+- `runtime`: `bun1.x` (uses Bun runtime - supports Web Standard handlers)
 - `handler`: `index.js` (the entry file)
-- `launcherType`: `Nodejs` (required for traditional Node.js handlers)
-- `supportsResponseStreaming`: `true` (optional)
+- `supportsResponseStreaming`: `true`
+
+**Note**: The `apps/deployments` project has `bunVersion: 1.x` in its vercel.json to ensure Bun is used.
 
 ### Common Issues Encountered
 
@@ -116,11 +118,11 @@ module.exports = async (req, res) => {
 
 2. **TypeScript syntax errors in sandbox**: Node.js not recognizing TS → Fixed with `--experimental-strip-types` flag and `.ts` extension
 
-3. **ESM module errors on Vercel**: "type": "module" needed → Later removed when switching to CommonJS wrapper approach
+3. **Invalid URL error**: `new URL(req.url)` fails with relative paths → Use `new URL(req.url, "http://localhost")` base URL
 
-4. **Invalid URL error**: `new URL(req.url)` fails with relative paths → Use `new URL(req.url, "http://localhost")` base URL
+4. **Bun not found in PATH**: After curl install, Bun is at `~/.bun/bin/bun` → Use `export PATH="$HOME/.bun/bin:$PATH"` before running bun commands
 
-5. **Function timeout (300s)**: Vercel runtime not recognizing handler format → Fixed by wrapping Web Standard handler for Node.js
+5. **Historical: Node.js wrapper issues**: Previously used CommonJS wrapper for Node.js runtime. Migrated to Bun runtime which supports Web Standard handlers natively - no wrapper needed
 
 ## Code Patterns
 
@@ -150,18 +152,23 @@ Discriminated union patterns in `lib/types.ts`:
 
 ## Environment Variables
 
+See `apps/web/.env.example` for the full template.
+
 ```bash
 # Required - Vercel Deployment
-VERCEL_API_TOKEN         # Vercel API token
-VERCEL_WORKER_PROJECT_ID # Target project for deployments
+VERCEL_API_TOKEN         # Vercel API token (https://vercel.com/account/tokens)
+VERCEL_WORKER_PROJECT_ID # Target project ID for deployments
 
-# Required - Redis Storage
-KV_REST_API_URL          # Upstash Redis endpoint
-KV_REST_API_TOKEN        # Upstash authentication token
+# Required - Redis Storage (Upstash/Vercel KV)
+KV_REST_API_URL          # Upstash Redis REST API endpoint
+KV_REST_API_TOKEN        # Upstash REST API token (read/write)
 
 # Optional
 VERCEL_TEAM_ID           # Team scope for API calls
 VERCEL_OIDC_TOKEN        # Secure OIDC authentication
+KV_REST_API_READ_ONLY_TOKEN  # Read-only token (if needed)
+KV_URL                   # Vercel KV connection URL
+REDIS_URL                # Alternative Redis URL
 ```
 
 ## File Structure
@@ -169,14 +176,19 @@ VERCEL_OIDC_TOKEN        # Secure OIDC authentication
 ```
 faas/                           # Monorepo root
 ├── turbo.json                  # Turborepo task configuration
-├── package.json                # Root workspace config
+├── package.json                # Root workspace config (bun@1.3.1)
+├── bun.lock                    # Bun lockfile
+├── CLAUDE.md                   # This file - AI context
 ├── apps/
 │   ├── web/                    # @faas/web - Next.js FaaS platform
+│   │   ├── .vercel/            # Vercel project config (sandbox-faas)
+│   │   ├── .env.example        # Environment variables template
+│   │   ├── .env.local          # Local environment (gitignored)
 │   │   ├── app/
 │   │   │   ├── api/
 │   │   │   │   ├── session/route.ts        # Session CRUD
 │   │   │   │   ├── run/route.ts            # Execute code (SSE)
-│   │   │   │   ├── build/route.ts          # esbuild bundling (SSE)
+│   │   │   │   ├── build/route.ts          # Bun bundling (SSE)
 │   │   │   │   ├── deploy/route.ts         # Vercel deployment (SSE)
 │   │   │   │   ├── stop/route.ts           # Stop running execution
 │   │   │   │   ├── deployments/
@@ -187,14 +199,22 @@ faas/                           # Monorepo root
 │   │   │   │   ├── snapshot/route.ts       # Create snapshot
 │   │   │   │   └── restore/route.ts        # Restore snapshot
 │   │   │   ├── page.tsx                    # Renders Playground
-│   │   │   └── layout.tsx
+│   │   │   ├── layout.tsx
+│   │   │   └── globals.css                 # Tailwind CSS 4 styles
 │   │   ├── components/
 │   │   │   ├── playground/
 │   │   │   │   ├── index.tsx               # Main playground container
+│   │   │   │   ├── header.tsx              # Playground header/toolbar
 │   │   │   │   ├── code-editor-panel.tsx   # Monaco editor wrapper
 │   │   │   │   ├── output-panel.tsx        # Execution output display
 │   │   │   │   ├── deployments-panel.tsx   # Deployments list
+│   │   │   │   ├── deployment-inspect-sheet.tsx  # Deployment details sheet
 │   │   │   │   └── footer-actions.tsx      # Action buttons
+│   │   │   ├── ai-elements/                # AI-themed UI components
+│   │   │   │   ├── terminal.tsx            # Terminal output component
+│   │   │   │   └── shimmer.tsx             # Loading shimmer effect
+│   │   │   ├── shadcnio/                   # Shadcn.io components
+│   │   │   │   └── rotating-text.tsx       # Rotating text animation
 │   │   │   └── ui/                         # Shadcn/ui components
 │   │   ├── hooks/
 │   │   │   ├── index.ts                    # Barrel exports
@@ -214,11 +234,12 @@ faas/                           # Monorepo root
 │   │   │   ├── session-validation.ts       # Request validation
 │   │   │   ├── types.ts                    # TypeScript type definitions
 │   │   │   ├── utils.ts                    # cn(), minDelay() utilities
-│   │   │   └── vercel-deploy.ts            # Vercel API + handler wrapping
+│   │   │   └── vercel-deploy.ts            # Vercel Deployment API client
 │   │   └── package.json
 │   └── deployments/            # @faas/deployments - Vercel deployment target
-│       ├── .vercel/            # Vercel project config (worker-deployments)
-│       ├── vercel.json
+│       ├── .vercel/            # Vercel project config (faas-deployments)
+│       ├── .env.local          # Local environment (gitignored)
+│       ├── vercel.json         # Vercel config (bunVersion: 1.x)
 │       └── package.json
 └── packages/                   # Shared packages (future use)
 ```
