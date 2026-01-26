@@ -1,14 +1,16 @@
-# Sandbox FaaS
+# FaaS (FLUID-as-a-Service)
 
 A white-labeled FaaS (Function-as-a-Service) platform that uses Vercel Sandbox for development/testing and deploys to Vercel Serverless Functions (Fluid Compute) for production.
 
 ## Features
 
-- **Interactive Code Editor**: Write and test Node.js/TypeScript code in real-time
+- **Interactive Code Editor**: Write and test TypeScript code in real-time with Monaco Editor
 - **Sandbox Execution**: Run code in isolated Vercel Sandbox microVMs (Node.js 24)
-- **Build & Deploy**: Bundle code with esbuild and deploy to Vercel Serverless Functions
+- **Build & Deploy**: Bundle code with Bun and deploy to Vercel Bun runtime
 - **Session Management**: Create, snapshot, and restore sandbox sessions
 - **Deployment Management**: List, copy URLs, and delete deployments
+- **Cron Scheduling**: Configure scheduled function execution
+- **Multi-Region Deployment**: Deploy to specific Vercel regions
 
 ## Architecture
 
@@ -17,9 +19,9 @@ A white-labeled FaaS (Function-as-a-Service) platform that uses Vercel Sandbox f
 │                         Web UI                                   │
 │  ┌──────────────┐  ┌──────────────┐  ┌───────────────────────┐  │
 │  │ Code Editor  │  │    Output    │  │  Deployed Functions   │  │
-│  │  (textarea)  │  │    Panel     │  │  - URL, status, cron  │  │
+│  │   (Monaco)   │  │    Panel     │  │  - URL, status, cron  │  │
 │  └──────────────┘  └──────────────┘  └───────────────────────┘  │
-│  [New Session] [Run] [Build] [Deploy] [Save Env] [Restore]      │
+│  [New Session] [Run] [Build] [Deploy]                           │
 └─────────────────────────┬───────────────────────────────────────┘
                           │
         ┌─────────────────┴─────────────────┐
@@ -27,9 +29,9 @@ A white-labeled FaaS (Function-as-a-Service) platform that uses Vercel Sandbox f
 ┌─────────────────────────────┐     ┌───────────────────┐
 │         Sandbox             │     │  Vercel Deploy    │
 │        Node.js 24           │     │  (Build Output)   │
-│  ┌─────────┐  ┌──────────┐  │────▶│  Fluid Compute    │
+│  ┌─────────┐  ┌──────────┐  │────▶│  Bun Runtime      │
 │  │Dev/Test │  │  Build   │  │     └───────────────────┘
-│  │  (Run)  │  │ (esbuild)│  │
+│  │  (Run)  │  │  (Bun)   │  │
 │  └─────────┘  └──────────┘  │
 └─────────────────────────────┘
 ```
@@ -37,29 +39,31 @@ A white-labeled FaaS (Function-as-a-Service) platform that uses Vercel Sandbox f
 ## User Workflow
 
 1. **Write & Test**: Write code in editor, click "Run" to test in Sandbox
-2. **Build**: Click "Build" to bundle with esbuild
+2. **Build**: Click "Build" to bundle with Bun
 3. **Deploy**: Click "Deploy" to create Vercel Serverless Function
 4. **Manage**: View deployed functions, copy URLs, delete deployments
 
-## Function Signature (Web Standard)
+## Function Signature (Bun Handler)
 
-Users write Web Standard Request/Response handlers:
+Users write Bun-style fetch handlers that deploy directly to Vercel's Bun runtime:
 
 ```typescript
-export default async function handler(req: Request): Promise<Response> {
-  const url = new URL(req.url, "http://localhost");
+export default {
+  async fetch(request: Request): Promise<Response> {
+    const url = new URL(request.url, "http://localhost");
 
-  if (req.method === "GET") {
-    return new Response(JSON.stringify({ message: "Hello!" }), {
-      headers: { "Content-Type": "application/json" }
-    });
-  }
+    if (request.method === "GET") {
+      return new Response(JSON.stringify({ message: "Hello!" }), {
+        headers: { "Content-Type": "application/json" },
+      });
+    }
 
-  return new Response("Method not allowed", { status: 405 });
-}
+    return new Response("Method not allowed", { status: 405 });
+  },
+};
 ```
 
-The build process wraps this in a Node.js adapter for Vercel's runtime.
+The Bun runtime natively supports Web Standard Request/Response - no wrapper needed.
 
 ## Environment Variables
 
@@ -72,27 +76,27 @@ VERCEL_TEAM_ID=xxx             # Team ID (optional)
 
 ## API Routes
 
-| Route | Method | Description |
-|-------|--------|-------------|
-| `/api/session` | POST | Create new sandbox session |
-| `/api/session` | GET | Get current session status |
-| `/api/session` | DELETE | Stop session |
-| `/api/run` | POST | Execute code in sandbox (SSE) |
-| `/api/build` | POST | Bundle code with esbuild (SSE) |
-| `/api/deploy` | POST | Deploy to Vercel |
-| `/api/deployments` | GET | List all deployments |
-| `/api/deployments/[id]` | GET | Get deployment details |
-| `/api/deployments/[id]` | DELETE | Delete deployment |
-| `/api/snapshot` | POST | Create sandbox snapshot |
-| `/api/restore` | POST | Restore from snapshot |
+| Route                   | Method | Description                   |
+| ----------------------- | ------ | ----------------------------- |
+| `/api/session`          | POST   | Create new sandbox session    |
+| `/api/session`          | GET    | Get current session status    |
+| `/api/session`          | DELETE | Stop session                  |
+| `/api/run`              | POST   | Execute code in sandbox (SSE) |
+| `/api/build`            | POST   | Bundle code with Bun (SSE)    |
+| `/api/deploy`           | POST   | Deploy to Vercel              |
+| `/api/deployments`      | GET    | List all deployments          |
+| `/api/deployments/[id]` | GET    | Get deployment details        |
+| `/api/deployments/[id]` | DELETE | Delete deployment             |
+| `/api/snapshot`         | POST   | Create sandbox snapshot       |
+| `/api/restore`          | POST   | Restore from snapshot         |
 
 ## Technical Details
 
 ### Build Process
 
 1. User code saved to `/tmp/src/handler.ts` in sandbox
-2. esbuild bundles to CommonJS: `--format=cjs --platform=node --target=node22`
-3. Bundled code wrapped with Node.js `(req, res)` adapter
+2. Bun bundles to ESM: `bun build --target=bun --outfile=/tmp/dist/index.js`
+3. ESM bundle deployed as-is (no wrapper needed for Bun runtime)
 4. Deployed using Vercel Build Output API v3
 
 ### Build Output Structure
@@ -103,33 +107,33 @@ VERCEL_TEAM_ID=xxx             # Team ID (optional)
 └── functions/
     └── api/
         └── handler.func/
-            ├── .vc-config.json   # Runtime: nodejs24.x
-            └── index.js          # Wrapped handler code
+            ├── .vc-config.json   # Runtime: bun1.x
+            └── index.js          # ESM bundled handler (no wrapper)
 ```
 
-### Handler Wrapping
+### Bun Runtime
 
-Web Standard handlers are wrapped for Node.js compatibility:
+Vercel's Bun runtime (`bun1.x`) natively supports Web Standard handlers:
 
-- Converts Node.js `req` to Web Standard `Request`
-- Calls user's handler
-- Converts Web Standard `Response` back to Node.js `res`
+- No Node.js adapter or wrapper needed
+- Direct Request/Response API support
+- Handlers deploy as-is after bundling
 
 ## Development
 
 ```bash
-npm install
-npm run dev
+bun install
+bun dev
 ```
 
 ## Key Files
 
-| File | Purpose |
-|------|---------|
-| `components/playground.tsx` | Main UI component |
-| `lib/sandbox.ts` | Sandbox SDK wrapper |
-| `lib/session-store.ts` | In-memory session state |
-| `lib/deployments-store.ts` | In-memory deployments state |
-| `lib/vercel-deploy.ts` | Vercel API helpers & handler wrapping |
-| `app/api/build/route.ts` | esbuild bundling endpoint |
-| `app/api/deploy/route.ts` | Deployment endpoint |
+| File                        | Purpose                               |
+| --------------------------- | ------------------------------------- |
+| `components/playground.tsx` | Main UI component                     |
+| `lib/sandbox.ts`            | Sandbox SDK wrapper                   |
+| `lib/session-store.ts`      | In-memory session state               |
+| `lib/deployments-store.ts`  | Redis-backed deployments state        |
+| `lib/vercel-deploy.ts`      | Vercel API helpers & handler wrapping |
+| `app/api/build/route.ts`    | Bun bundling endpoint                 |
+| `app/api/deploy/route.ts`   | Deployment endpoint                   |

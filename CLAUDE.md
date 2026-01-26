@@ -62,17 +62,10 @@ cd apps/web && bun tsc --noEmit   # Type check web app
 - Code saved as `.ts` files and executed directly
 - Streaming output via SSE using `detached: true` mode and `command.logs()` iterator
 
-### Session Store
-
-- In-memory storage using `globalThis` to persist across hot reloads in Next.js dev mode
-- Without `globalThis`, module-level variables get reset between API requests in Turbopack
-- Sessions track: `sandboxId`, `status`, `timeout`, `snapshotId`, `createdAt`
-- Session timeout auto-extends by 2 minutes on successful run/build operations
-
 ### Deployment Store
 
-- Deployments persisted in **Upstash Redis** (not in-memory)
-- User isolation via IP address extracted from `x-forwarded-for` header
+- Deployments persisted in **Upstash Redis**
+- User isolation via IP address extracted from `x-forwarded-for` header (PoC ONLY solution)
 - Deployments include: id, url, functionName, createdAt, status, cronSchedule, regions, errorMessage, buildLogs
 
 ### Build Process (Bun)
@@ -89,9 +82,11 @@ cd apps/web && bun tsc --noEmit   # Type check web app
 
 ```javascript
 // User writes (and this deploys as-is):
-export default async function handler(req: Request): Promise<Response> {
-  return new Response('Hello World');
-}
+export default {
+  async fetch(request: Request): Promise<Response> {
+    return new Response('Hello World');
+  }
+};
 ```
 
 **Build Output API v3 Structure**:
@@ -111,18 +106,6 @@ export default async function handler(req: Request): Promise<Response> {
 - `supportsResponseStreaming`: `true`
 
 **Note**: The `apps/deployments` project has `bunVersion: 1.x` in its vercel.json to ensure Bun is used.
-
-### Common Issues Encountered
-
-1. **"No active session" error**: Session store not persisting → Fixed with `globalThis`
-
-2. **TypeScript syntax errors in sandbox**: Node.js not recognizing TS → Fixed with `--experimental-strip-types` flag and `.ts` extension
-
-3. **Invalid URL error**: `new URL(req.url)` fails with relative paths → Use `new URL(req.url, "http://localhost")` base URL
-
-4. **Bun not found in PATH**: After curl install, Bun is at `~/.bun/bin/bun` → Use `export PATH="$HOME/.bun/bin:$PATH"` before running bun commands
-
-5. **Historical: Node.js wrapper issues**: Previously used CommonJS wrapper for Node.js runtime. Migrated to Bun runtime which supports Web Standard handlers natively - no wrapper needed
 
 ## Code Patterns
 
@@ -237,7 +220,7 @@ faas/                           # Monorepo root
 │   │   │   └── vercel-deploy.ts            # Vercel Deployment API client
 │   │   └── package.json
 │   └── deployments/            # @faas/deployments - Vercel deployment target
-│       ├── .vercel/            # Vercel project config (faas-deployments)
+│       ├── .vercel/            # Vercel project config (worker-deployments)
 │       ├── .env.local          # Local environment (gitignored)
 │       ├── vercel.json         # Vercel config (bunVersion: 1.x)
 │       └── package.json
