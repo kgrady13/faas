@@ -1,4 +1,4 @@
-# FaaS (FLUID-as-a-Service)
+# FaaS (FLUID-as-a-Service) — PoC Only (not production ready)
 
 A white-labeled FaaS (Function-as-a-Service) platform that uses Vercel Sandbox for development/testing and deploys to Vercel Serverless Functions (Fluid Compute) for production.
 
