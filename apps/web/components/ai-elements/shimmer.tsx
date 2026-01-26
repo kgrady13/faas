@@ -46,7 +46,8 @@ const ShimmerComponent = ({
   );
 
   return (
-    <MotionComponent
+
+    <motion.div
       animate={{ backgroundPosition: "0% center" }}
       className={cn(
         "relative inline-block bg-size-[250%_100%,auto] bg-clip-text text-transparent",
@@ -68,7 +69,7 @@ const ShimmerComponent = ({
       }}
     >
       {children}
-    </MotionComponent>
+    </motion.div>
   );
 };
 
