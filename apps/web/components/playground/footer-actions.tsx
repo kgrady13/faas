@@ -12,7 +12,7 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuCheckboxItem,
 } from "@/components/ui/dropdown-menu";
-import { Clock } from "lucide-react";
+import { Clock, Github } from "lucide-react";
 import { CRON_PRESETS, REGION_OPTIONS, getCronLabel } from "@/lib/constants";
 
 interface FooterActionsProps {
@@ -142,11 +142,23 @@ export function FooterActions({
         </DropdownMenuContent>
       </DropdownMenu>
 
+      <div className="flex-1" />
+
       {remainingTime > 0 && remainingTime < 60000 && sessionRunning && (
-        <span className="ml-auto text-sm text-destructive">
+        <span className="text-sm text-destructive">
           Warning: Session expires soon!
         </span>
       )}
+
+      <a
+        href="https://github.com/kgrady13/faas.git"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-muted-foreground hover:text-foreground transition-colors"
+        aria-label="View on GitHub"
+      >
+        <Github className="size-5" />
+      </a>
     </footer>
   );
 }
