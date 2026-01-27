@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import type { SessionState, SessionLoadingState } from "@/hooks";
 import { formatTime } from "@/lib/format";
+import { ThemeToggle } from "@/components/theme-toggle";
 
 interface PlaygroundHeaderProps {
   session: SessionState | null;
@@ -115,6 +116,7 @@ export function PlaygroundHeader({
       </div>
       <div className="flex items-center gap-3 relative">
         {getStatusBadge()}
+        <ThemeToggle />
         {/* Dev Tools Button */}
         <button
           ref={buttonRef}
