@@ -56,7 +56,7 @@ export function PlaygroundHeader({
     switch (session.status) {
       case "running":
         return (
-          <Badge variant="default" className="bg-emerald-600 hover:bg-emerald-600">
+          <Badge variant="default">
             Ready
           </Badge>
         );
@@ -86,7 +86,7 @@ export function PlaygroundHeader({
     if (!session) return "bg-gray-400";
     switch (session.status) {
       case "running":
-        return "bg-emerald-500";
+        return "bg-foreground";
       case "paused":
         return "bg-yellow-500";
       case "pending":
@@ -184,7 +184,7 @@ export function PlaygroundHeader({
                     variant="outline"
                     className={
                       session?.status === "running"
-                        ? "border-emerald-500 text-emerald-600 dark:text-emerald-400"
+                        ? "border-foreground text-foreground"
                         : session?.status === "paused"
                           ? "border-yellow-500 text-yellow-600 dark:text-yellow-400"
                           : ""
