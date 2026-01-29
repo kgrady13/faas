@@ -1,12 +1,120 @@
 import { Sandbox } from "@vercel/sandbox";
-import * as fs from "fs/promises";
-import * as path from "path";
 
 // Store the active sandbox instance (may be lost across requests in dev mode)
 let activeSandbox: Sandbox | null = null;
 
 // Track if SDK has been installed in the current sandbox
 const sdkInstalledSandboxes = new Set<string>();
+
+// SDK bundle inlined at build time (avoids filesystem reads in serverless)
+const SDK_BUNDLE = `// @faas/sdk
+class Worker {
+  capabilities = [];
+  addCapability(capability) {
+    this.capabilities.push(capability);
+    return this;
+  }
+  getCapabilities() {
+    return [...this.capabilities];
+  }
+  getCapability(name) {
+    return this.capabilities.find((c) => c.name === name);
+  }
+  hasCapability(name) {
+    return this.capabilities.some((c) => c.name === name);
+  }
+  async fetch(request) {
+    const url = new URL(request.url, "http://localhost");
+    const path = url.pathname;
+    const method = request.method;
+    if (method === "GET" && (path === "/" || path === "")) {
+      return Response.json({
+        capabilities: this.capabilities.map((c) => ({
+          type: c.type,
+          name: c.name,
+          description: c.description
+        }))
+      });
+    }
+    const match = path.match(/^\\/(skill|sync|automation)\\/(.+)$/);
+    if (!match) {
+      return Response.json({ error: "Not found", path }, { status: 404 });
+    }
+    const [, type, name] = match;
+    const capability = this.capabilities.find((c) => c.type === type && c.name === name);
+    if (!capability) {
+      return Response.json({ error: \`Capability not found: \${type}/\${name}\` }, { status: 404 });
+    }
+    try {
+      if (capability.type === "skill") {
+        const input = method === "POST" ? await request.json() : {};
+        const result = await capability.execute(input);
+        return Response.json({ success: true, result });
+      }
+      if (capability.type === "sync") {
+        await capability.sync();
+        return Response.json({ success: true });
+      }
+      if (capability.type === "automation") {
+        const event = await request.json();
+        await capability.run(event);
+        return Response.json({ success: true });
+      }
+      return Response.json({ error: "Unknown capability type" }, { status: 400 });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      return Response.json({ error: message }, { status: 500 });
+    }
+  }
+}
+function createWorker() {
+  return new Worker;
+}
+export {
+  createWorker,
+  Worker
+};`;
+
+const SDK_TYPES = `export interface Capability {
+  name: string;
+  description?: string;
+}
+export interface SyncCapability extends Capability {
+  type: "sync";
+  sync: () => Promise<void>;
+}
+export interface AutomationCapability extends Capability {
+  type: "automation";
+  trigger: "page_changed" | "database_changed";
+  run: (event: AutomationEvent) => Promise<void>;
+}
+export interface SkillCapability<TInput = any, TOutput = any> extends Capability {
+  type: "skill";
+  execute: (input: TInput) => Promise<TOutput>;
+}
+export type WorkerCapability = SyncCapability | AutomationCapability | SkillCapability<any, any>;
+export interface AutomationEvent {
+  type: "page_changed" | "database_changed";
+  targetId: string;
+  timestamp: string;
+  metadata?: Record<string, unknown>;
+}
+export declare class Worker {
+  addCapability(capability: WorkerCapability): this;
+  getCapabilities(): WorkerCapability[];
+  getCapability(name: string): WorkerCapability | undefined;
+  hasCapability(name: string): boolean;
+  fetch(request: Request): Promise<Response>;
+}
+export declare function createWorker(): Worker;`;
+
+const SDK_PACKAGE_JSON = JSON.stringify({
+  name: "@faas/sdk",
+  version: "0.0.1",
+  type: "module",
+  main: "dist/index.js",
+  types: "dist/index.d.ts",
+});
 
 export async function createSandbox(snapshotId?: string): Promise<Sandbox> {
   // Stop existing sandbox if running
@@ -182,7 +290,7 @@ export function setActiveSandbox(sandbox: Sandbox | null): void {
 
 /**
  * Ensure the @faas/sdk is available in the sandbox's node_modules.
- * This reads the pre-built SDK from the web app's node_modules and copies it to the sandbox.
+ * Uses inlined SDK content (no filesystem reads) for serverless compatibility.
  */
 export async function ensureSdk(sandboxId: string): Promise<void> {
   // Skip if already installed in this sandbox
@@ -192,34 +300,25 @@ export async function ensureSdk(sandboxId: string): Promise<void> {
 
   const sandbox = await getOrReconnectSandbox(sandboxId);
 
-  // Read SDK files from the web app's node_modules
-  const sdkBasePath = path.join(process.cwd(), "node_modules/@faas/sdk");
-
-  const [sdkBundle, sdkTypes, sdkPackageJson] = await Promise.all([
-    fs.readFile(path.join(sdkBasePath, "dist/index.js"), "utf-8"),
-    fs.readFile(path.join(sdkBasePath, "dist/index.d.ts"), "utf-8"),
-    fs.readFile(path.join(sdkBasePath, "package.json"), "utf-8"),
-  ]);
-
   // Create node_modules structure in sandbox at /tmp
   await sandbox.runCommand("mkdir", [
     "-p",
     "/tmp/node_modules/@faas/sdk/dist",
   ]);
 
-  // Write SDK files to sandbox
+  // Write inlined SDK files to sandbox
   await sandbox.writeFiles([
     {
       path: "/tmp/node_modules/@faas/sdk/dist/index.js",
-      content: Buffer.from(sdkBundle, "utf-8"),
+      content: Buffer.from(SDK_BUNDLE, "utf-8"),
     },
     {
       path: "/tmp/node_modules/@faas/sdk/dist/index.d.ts",
-      content: Buffer.from(sdkTypes, "utf-8"),
+      content: Buffer.from(SDK_TYPES, "utf-8"),
     },
     {
       path: "/tmp/node_modules/@faas/sdk/package.json",
-      content: Buffer.from(sdkPackageJson, "utf-8"),
+      content: Buffer.from(SDK_PACKAGE_JSON, "utf-8"),
     },
   ]);
 
