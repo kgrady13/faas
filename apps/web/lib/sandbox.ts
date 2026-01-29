@@ -1,7 +1,12 @@
 import { Sandbox } from "@vercel/sandbox";
+import * as fs from "fs/promises";
+import * as path from "path";
 
 // Store the active sandbox instance (may be lost across requests in dev mode)
 let activeSandbox: Sandbox | null = null;
+
+// Track if SDK has been installed in the current sandbox
+const sdkInstalledSandboxes = new Set<string>();
 
 export async function createSandbox(snapshotId?: string): Promise<Sandbox> {
   // Stop existing sandbox if running
@@ -29,7 +34,9 @@ export async function createSandbox(snapshotId?: string): Promise<Sandbox> {
 }
 
 // Get sandbox - reconnect using sandboxId if needed
-export async function getOrReconnectSandbox(sandboxId: string): Promise<Sandbox> {
+export async function getOrReconnectSandbox(
+  sandboxId: string,
+): Promise<Sandbox> {
   // If we have an active sandbox with matching ID, use it
   if (activeSandbox && activeSandbox.sandboxId === sandboxId) {
     return activeSandbox;
@@ -57,24 +64,35 @@ export async function stopSandbox(sandboxId?: string): Promise<void> {
 }
 
 export async function executeCode(
-  code: string
+  code: string,
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   if (!activeSandbox) {
     throw new Error("No active sandbox");
   }
 
-  // Write code to .ts file - Node 24 supports TypeScript natively
+  const sandboxId = activeSandbox.sandboxId;
+
+  // Ensure Bun is installed
+  await installBun(sandboxId);
+
+  // Ensure SDK is available
+  await ensureSdk(sandboxId);
+
+  // Create source directory
+  await activeSandbox.runCommand("mkdir", ["-p", "/tmp/src"]);
+
+  // Write code to /tmp/src/handler.ts
   await activeSandbox.writeFiles([
     {
-      path: "/vercel/sandbox/script.ts",
+      path: "/tmp/src/handler.ts",
       content: Buffer.from(code, "utf-8"),
     },
   ]);
 
-  // Execute with --experimental-strip-types for TypeScript support
-  const result = await activeSandbox.runCommand("node", [
-    "--experimental-strip-types",
-    "/vercel/sandbox/script.ts"
+  // Execute with Bun - handles TypeScript natively and resolves SDK imports
+  const result = await activeSandbox.runCommand("sh", [
+    "-c",
+    'export PATH="$HOME/.bun/bin:$PATH" && cd /tmp && bun run src/handler.ts',
   ]);
 
   // stdout and stderr are async methods, not properties
@@ -93,23 +111,40 @@ export async function executeCode(
 // Streaming execution - returns an async generator of log events
 export async function* executeCodeStreaming(
   code: string,
-  sandboxId: string
+  sandboxId: string,
 ): AsyncGenerator<{ type: "stdout" | "stderr" | "exit"; data: string }> {
   // Reconnect to the sandbox if needed
   const sandbox = await getOrReconnectSandbox(sandboxId);
 
-  // Write code to .ts file - Node 24 supports TypeScript natively
+  // Ensure Bun is installed for running code
+  const installResult = await installBun(sandboxId);
+  if (!installResult.success) {
+    yield { type: "stderr", data: "Failed to install Bun runtime" };
+    yield { type: "exit", data: "1" };
+    return;
+  }
+
+  // Ensure SDK is available in the sandbox
+  await ensureSdk(sandboxId);
+
+  // Create source directory
+  await sandbox.runCommand("mkdir", ["-p", "/tmp/src"]);
+
+  // Write code to /tmp/src/handler.ts (same location as build for consistency)
   await sandbox.writeFiles([
     {
-      path: "/vercel/sandbox/script.ts",
+      path: "/tmp/src/handler.ts",
       content: Buffer.from(code, "utf-8"),
     },
   ]);
 
-  // Execute in detached mode with TypeScript support
+  // Execute with Bun - it handles TypeScript natively and resolves @faas/sdk from node_modules
   const command = await sandbox.runCommand({
-    cmd: "node",
-    args: ["--experimental-strip-types", "/vercel/sandbox/script.ts"],
+    cmd: "sh",
+    args: [
+      "-c",
+      'export PATH="$HOME/.bun/bin:$PATH" && cd /tmp && bun run src/handler.ts',
+    ],
     detached: true,
   });
 
@@ -143,18 +178,69 @@ export function setActiveSandbox(sandbox: Sandbox | null): void {
   activeSandbox = sandbox;
 }
 
+// SDK installation helpers
+
+/**
+ * Ensure the @faas/sdk is available in the sandbox's node_modules.
+ * This reads the pre-built SDK from the web app's node_modules and copies it to the sandbox.
+ */
+export async function ensureSdk(sandboxId: string): Promise<void> {
+  // Skip if already installed in this sandbox
+  if (sdkInstalledSandboxes.has(sandboxId)) {
+    return;
+  }
+
+  const sandbox = await getOrReconnectSandbox(sandboxId);
+
+  // Read SDK files from the web app's node_modules
+  const sdkBasePath = path.join(process.cwd(), "node_modules/@faas/sdk");
+
+  const [sdkBundle, sdkTypes, sdkPackageJson] = await Promise.all([
+    fs.readFile(path.join(sdkBasePath, "dist/index.js"), "utf-8"),
+    fs.readFile(path.join(sdkBasePath, "dist/index.d.ts"), "utf-8"),
+    fs.readFile(path.join(sdkBasePath, "package.json"), "utf-8"),
+  ]);
+
+  // Create node_modules structure in sandbox at /tmp
+  await sandbox.runCommand("mkdir", [
+    "-p",
+    "/tmp/node_modules/@faas/sdk/dist",
+  ]);
+
+  // Write SDK files to sandbox
+  await sandbox.writeFiles([
+    {
+      path: "/tmp/node_modules/@faas/sdk/dist/index.js",
+      content: Buffer.from(sdkBundle, "utf-8"),
+    },
+    {
+      path: "/tmp/node_modules/@faas/sdk/dist/index.d.ts",
+      content: Buffer.from(sdkTypes, "utf-8"),
+    },
+    {
+      path: "/tmp/node_modules/@faas/sdk/package.json",
+      content: Buffer.from(sdkPackageJson, "utf-8"),
+    },
+  ]);
+
+  // Mark as installed
+  sdkInstalledSandboxes.add(sandboxId);
+}
+
 // Build-related helpers for Bun bundling
 
 /**
  * Install Bun in the sandbox if not already installed
  * Uses the official Bun install script via curl
  */
-export async function installBun(sandboxId: string): Promise<{ success: boolean; logs: string[] }> {
+export async function installBun(
+  sandboxId: string,
+): Promise<{ success: boolean; logs: string[] }> {
   const sandbox = await getOrReconnectSandbox(sandboxId);
   const logs: string[] = [];
 
   // Check if Bun is already installed
-  const checkResult = await sandbox.runCommand('which', ['bun']);
+  const checkResult = await sandbox.runCommand("which", ["bun"]);
 
   if (checkResult.exitCode === 0) {
     const bunPath = await checkResult.stdout();
@@ -163,9 +249,9 @@ export async function installBun(sandboxId: string): Promise<{ success: boolean;
   }
 
   // Install Bun using official install script (faster and more reliable than npm)
-  logs.push('Installing Bun...');
-  const installResult = await sandbox.runCommand('sh', [
-    '-c',
+  logs.push("Installing Bun...");
+  const installResult = await sandbox.runCommand("sh", [
+    "-c",
     'curl -fsSL https://bun.sh/install | bash && export BUN_INSTALL="$HOME/.bun" && export PATH="$BUN_INSTALL/bin:$PATH"',
   ]);
 
@@ -187,45 +273,49 @@ export async function installBun(sandboxId: string): Promise<{ success: boolean;
  */
 export async function* buildCode(
   code: string,
-  sandboxId: string
-): AsyncGenerator<{ type: 'log' | 'error' | 'done'; data: string }> {
+  sandboxId: string,
+): AsyncGenerator<{ type: "log" | "error" | "done"; data: string }> {
   const sandbox = await getOrReconnectSandbox(sandboxId);
 
   // Ensure build directories exist
-  await sandbox.runCommand('mkdir', ['-p', '/tmp/src', '/tmp/dist']);
+  await sandbox.runCommand("mkdir", ["-p", "/tmp/src", "/tmp/dist"]);
+
+  // Ensure SDK is available for bundling
+  yield { type: "log", data: "Setting up @faas/sdk..." };
+  await ensureSdk(sandboxId);
 
   // Write user code to source file
   await sandbox.writeFiles([
     {
-      path: '/tmp/src/handler.ts',
-      content: Buffer.from(code, 'utf-8'),
+      path: "/tmp/src/handler.ts",
+      content: Buffer.from(code, "utf-8"),
     },
   ]);
 
-  yield { type: 'log', data: 'Source code written to /tmp/src/handler.ts' };
+  yield { type: "log", data: "Source code written to /tmp/src/handler.ts" };
 
   // Install Bun if needed
-  yield { type: 'log', data: 'Checking Bun installation...' };
+  yield { type: "log", data: "Checking Bun installation..." };
   const installResult = await installBun(sandboxId);
   for (const log of installResult.logs) {
-    yield { type: 'log', data: log };
+    yield { type: "log", data: log };
   }
 
   if (!installResult.success) {
-    yield { type: 'error', data: 'Failed to install Bun' };
+    yield { type: "error", data: "Failed to install Bun" };
     return;
   }
 
   // Run Bun build to bundle the code
   // --target=bun: Optimizes for Bun runtime (default ESM output)
   // Bun handles TypeScript natively - no transpilation step needed
-  yield { type: 'log', data: 'Running bun build...' };
+  yield { type: "log", data: "Running bun build..." };
 
   // Use full path to bun since curl installs to ~/.bun/bin
   const buildCommand = await sandbox.runCommand({
-    cmd: 'sh',
+    cmd: "sh",
     args: [
-      '-c',
+      "-c",
       'export PATH="$HOME/.bun/bin:$PATH" && bun build /tmp/src/handler.ts --outfile=/tmp/dist/index.js --target=bun',
     ],
     detached: true,
@@ -233,18 +323,21 @@ export async function* buildCode(
 
   // Stream build logs
   for await (const log of buildCommand.logs()) {
-    yield { type: log.stream === 'stderr' ? 'error' : 'log', data: log.data };
+    yield { type: log.stream === "stderr" ? "error" : "log", data: log.data };
   }
 
   const result = await buildCommand.wait();
 
   if (result.exitCode !== 0) {
-    yield { type: 'error', data: `Build failed with exit code ${result.exitCode}` };
+    yield {
+      type: "error",
+      data: `Build failed with exit code ${result.exitCode}`,
+    };
     return;
   }
 
-  yield { type: 'log', data: 'Build completed successfully!' };
-  yield { type: 'done', data: '/tmp/dist/index.js' };
+  yield { type: "log", data: "Build completed successfully!" };
+  yield { type: "done", data: "/tmp/dist/index.js" };
 }
 
 /**
@@ -254,10 +347,10 @@ export async function readBundledCode(sandboxId: string): Promise<string> {
   const sandbox = await getOrReconnectSandbox(sandboxId);
 
   // Use cat to read the file content since readFile returns a stream
-  const result = await sandbox.runCommand('cat', ['/tmp/dist/index.js']);
+  const result = await sandbox.runCommand("cat", ["/tmp/dist/index.js"]);
 
   if (result.exitCode !== 0) {
-    throw new Error('Bundled code not found. Run build first.');
+    throw new Error("Bundled code not found. Run build first.");
   }
 
   const content = await result.stdout();

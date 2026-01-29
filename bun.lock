@@ -15,6 +15,7 @@
       "version": "0.1.0",
       "dependencies": {
         "@base-ui/react": "^1.1.0",
+        "@faas/sdk": "workspace:*",
         "@hugeicons/core-free-icons": "^3.1.1",
         "@hugeicons/react": "^1.1.4",
         "@monaco-editor/react": "^4.7.0",
@@ -44,6 +45,13 @@
         "eslint-config-next": "16.1.4",
         "tailwindcss": "^4",
         "typescript": "^5",
+      },
+    },
+    "packages/sdk": {
+      "name": "@faas/sdk",
+      "version": "0.0.1",
+      "devDependencies": {
+        "typescript": "^5.7.3",
       },
     },
   },
@@ -147,6 +155,8 @@
     "@eslint/plugin-kit": ["@eslint/plugin-kit@0.4.1", "", { "dependencies": { "@eslint/core": "^0.17.0", "levn": "^0.4.1" } }, "sha512-43/qtrDUokr7LJqoF2c3+RInu/t4zfrpYdoSDfYyhg52rwLV6TnOvdG4fXm7IkSB3wErkcmJS9iEhjVtOSEjjA=="],
 
     "@faas/deployments": ["@faas/deployments@workspace:apps/deployments"],
+
+    "@faas/sdk": ["@faas/sdk@workspace:packages/sdk"],
 
     "@faas/web": ["@faas/web@workspace:apps/web"],
 
