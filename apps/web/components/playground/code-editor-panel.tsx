@@ -58,6 +58,7 @@ const SDK_TYPES = `declare module "@faas/sdk" {
     getCapabilities(): WorkerCapability[];
     getCapability(name: string): WorkerCapability | undefined;
     hasCapability(name: string): boolean;
+    fetch(request: Request): Promise<Response>;
   }
 
   export function createWorker(): Worker;

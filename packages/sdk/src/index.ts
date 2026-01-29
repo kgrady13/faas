@@ -162,6 +162,78 @@ export class Worker {
   hasCapability(name: string): boolean {
     return this.capabilities.some((c) => c.name === name);
   }
+
+  /**
+   * HTTP fetch handler for Vercel Bun runtime compatibility.
+   * Routes requests to the appropriate capability based on the request.
+   *
+   * Endpoints:
+   * - GET  /                → List all capabilities
+   * - POST /skill/:name     → Execute a skill capability
+   * - POST /sync/:name      → Trigger a sync capability
+   * - POST /automation/:name → Trigger an automation (with event body)
+   */
+  async fetch(request: Request): Promise<Response> {
+    const url = new URL(request.url, "http://localhost");
+    const path = url.pathname;
+    const method = request.method;
+
+    // GET / - List capabilities
+    if (method === "GET" && (path === "/" || path === "")) {
+      return Response.json({
+        capabilities: this.capabilities.map((c) => ({
+          type: c.type,
+          name: c.name,
+          description: c.description,
+        })),
+      });
+    }
+
+    // Parse path: /:type/:name
+    const match = path.match(/^\/(skill|sync|automation)\/(.+)$/);
+    if (!match) {
+      return Response.json(
+        { error: "Not found", path },
+        { status: 404 }
+      );
+    }
+
+    const [, type, name] = match;
+    const capability = this.capabilities.find(
+      (c) => c.type === type && c.name === name
+    );
+
+    if (!capability) {
+      return Response.json(
+        { error: `Capability not found: ${type}/${name}` },
+        { status: 404 }
+      );
+    }
+
+    try {
+      if (capability.type === "skill") {
+        const input = method === "POST" ? await request.json() : {};
+        const result = await capability.execute(input);
+        return Response.json({ success: true, result });
+      }
+
+      if (capability.type === "sync") {
+        await capability.sync();
+        return Response.json({ success: true });
+      }
+
+      if (capability.type === "automation") {
+        const event = await request.json() as AutomationEvent;
+        await capability.run(event);
+        return Response.json({ success: true });
+      }
+
+      return Response.json({ error: "Unknown capability type" }, { status: 400 });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      return Response.json({ error: message }, { status: 500 });
+    }
+  }
 }
 
 // ============================================================================

@@ -1,8 +1,8 @@
 /**
- * @faas/sdk - Notion FaaS Worker SDK
+ * @faas/sdk - FaaS Worker SDK
  *
  * This SDK provides the Worker class and capability types for building
- * serverless functions that integrate with Notion.
+ * serverless functions that integrate with the faas platform.
  */
 /**
  * Base capability interface shared by all capability types.
@@ -14,7 +14,7 @@ export interface Capability {
     description?: string;
 }
 /**
- * Sync capability for importing external data into Notion.
+ * Sync capability for importing external data into the faas platform.
  * Use this when you need to periodically sync data from external sources.
  */
 export interface SyncCapability extends Capability {
@@ -23,7 +23,7 @@ export interface SyncCapability extends Capability {
     sync: () => Promise<void>;
 }
 /**
- * Automation capability for responding to Notion events.
+ * Automation capability for responding to faas platform events.
  * Use this when you want to run code in response to page or database changes.
  */
 export interface AutomationCapability extends Capability {
@@ -34,7 +34,7 @@ export interface AutomationCapability extends Capability {
     run: (event: AutomationEvent) => Promise<void>;
 }
 /**
- * Skill capability for exposing custom tools to Notion agents.
+ * Skill capability for exposing custom tools to faas agents.
  * Use this when you want to provide a callable function that agents can use.
  *
  * @typeParam TInput - The type of input the skill accepts
@@ -122,6 +122,17 @@ export declare class Worker {
      * @returns True if the capability exists
      */
     hasCapability(name: string): boolean;
+    /**
+     * HTTP fetch handler for Vercel Bun runtime compatibility.
+     * Routes requests to the appropriate capability based on the request.
+     *
+     * Endpoints:
+     * - GET  /                → List all capabilities
+     * - POST /skill/:name     → Execute a skill capability
+     * - POST /sync/:name      → Trigger a sync capability
+     * - POST /automation/:name → Trigger an automation (with event body)
+     */
+    fetch(request: Request): Promise<Response>;
 }
 /**
  * Create a new Worker instance.
