@@ -178,22 +178,23 @@ export class Worker {
     const path = url.pathname;
     const method = request.method;
 
-    // GET / - List capabilities
-    if (method === "GET" && (path === "/" || path === "")) {
-      return Response.json({
-        capabilities: this.capabilities.map((c) => ({
-          type: c.type,
-          name: c.name,
-          description: c.description,
-        })),
-      });
-    }
+    // Parse path - look for /:type/:name pattern anywhere in the path
+    // This handles both /skill/greet and /api/handler/skill/greet
+    const match = path.match(/\/(skill|sync|automation)\/([^/]+)\/?$/);
 
-    // Parse path: /:type/:name
-    const match = path.match(/^\/(skill|sync|automation)\/(.+)$/);
+    // If no capability path found, return capabilities list for GET, 404 for others
     if (!match) {
+      if (method === "GET") {
+        return Response.json({
+          capabilities: this.capabilities.map((c) => ({
+            type: c.type,
+            name: c.name,
+            description: c.description,
+          })),
+        });
+      }
       return Response.json(
-        { error: "Not found", path },
+        { error: "Not found. Use GET to list capabilities, or POST to /skill/:name, /sync/:name, /automation/:name", path },
         { status: 404 }
       );
     }

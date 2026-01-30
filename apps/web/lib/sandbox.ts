@@ -27,18 +27,18 @@ class Worker {
     const url = new URL(request.url, "http://localhost");
     const path = url.pathname;
     const method = request.method;
-    if (method === "GET" && (path === "/" || path === "")) {
-      return Response.json({
-        capabilities: this.capabilities.map((c) => ({
-          type: c.type,
-          name: c.name,
-          description: c.description
-        }))
-      });
-    }
-    const match = path.match(/^\\/(skill|sync|automation)\\/(.+)$/);
+    const match = path.match(/\\/(skill|sync|automation)\\/([^/]+)\\/?$/);
     if (!match) {
-      return Response.json({ error: "Not found", path }, { status: 404 });
+      if (method === "GET") {
+        return Response.json({
+          capabilities: this.capabilities.map((c) => ({
+            type: c.type,
+            name: c.name,
+            description: c.description
+          }))
+        });
+      }
+      return Response.json({ error: "Not found. Use GET to list capabilities, or POST to /skill/:name, /sync/:name, /automation/:name", path }, { status: 404 });
     }
     const [, type, name] = match;
     const capability = this.capabilities.find((c) => c.type === type && c.name === name);

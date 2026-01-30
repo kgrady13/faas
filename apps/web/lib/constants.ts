@@ -82,8 +82,10 @@ worker.addCapability({
   },
 });
 
-// Export the worker
-export default worker;
+// Export as a server (plain object with fetch for Vercel Bun runtime)
+export default {
+  fetch: (req: Request) => worker.fetch(req),
+};
 
 // Test the worker locally
 console.log("Worker capabilities:", worker.getCapabilities().map(c => c.name));
