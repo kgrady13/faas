@@ -197,10 +197,10 @@ export async function executeCode(
     },
   ]);
 
-  // Execute with Bun - handles TypeScript natively and resolves SDK imports
+  // Execute with Bun using dynamic import to prevent auto-server behavior
   const result = await activeSandbox.runCommand("sh", [
     "-c",
-    'export PATH="$HOME/.bun/bin:$PATH" && cd /tmp && bun run src/handler.ts',
+    `export PATH="$HOME/.bun/bin:$PATH" && cd /tmp && bun -e "await import('./src/handler.ts')"`,
   ]);
 
   // stdout and stderr are async methods, not properties
@@ -246,12 +246,13 @@ export async function* executeCodeStreaming(
     },
   ]);
 
-  // Execute with Bun - it handles TypeScript natively and resolves @faas/sdk from node_modules
+  // Execute with Bun using --bun flag to prevent auto-server behavior
+  // We import the module which runs top-level code but doesn't start a server
   const command = await sandbox.runCommand({
     cmd: "sh",
     args: [
       "-c",
-      'export PATH="$HOME/.bun/bin:$PATH" && cd /tmp && bun run src/handler.ts',
+      `export PATH="$HOME/.bun/bin:$PATH" && cd /tmp && bun -e "await import('./src/handler.ts')"`,
     ],
     detached: true,
   });
@@ -338,8 +339,13 @@ export async function installBun(
   const sandbox = await getOrReconnectSandbox(sandboxId);
   const logs: string[] = [];
 
-  // Check if Bun is already installed
-  const checkResult = await sandbox.runCommand("which", ["bun"]);
+  // Check if Bun is already installed (check both common locations)
+  logs.push("Checking for existing Bun installation...");
+
+  const checkResult = await sandbox.runCommand("sh", [
+    "-c",
+    'export PATH="$HOME/.bun/bin:$PATH" && which bun',
+  ]);
 
   if (checkResult.exitCode === 0) {
     const bunPath = await checkResult.stdout();
@@ -347,11 +353,12 @@ export async function installBun(
     return { success: true, logs };
   }
 
-  // Install Bun using official install script (faster and more reliable than npm)
-  logs.push("Installing Bun...");
+  // Install Bun using official install script
+  logs.push("Bun not found, installing via curl (this may take a moment)...");
+
   const installResult = await sandbox.runCommand("sh", [
     "-c",
-    'curl -fsSL https://bun.sh/install | bash && export BUN_INSTALL="$HOME/.bun" && export PATH="$BUN_INSTALL/bin:$PATH"',
+    'curl -fsSL https://bun.sh/install | bash',
   ]);
 
   const stdout = await installResult.stdout();
@@ -359,6 +366,23 @@ export async function installBun(
 
   if (stdout) logs.push(stdout);
   if (stderr) logs.push(stderr);
+
+  if (installResult.exitCode !== 0) {
+    logs.push(`Bun installation failed with exit code ${installResult.exitCode}`);
+    return { success: false, logs };
+  }
+
+  // Verify installation
+  logs.push("Verifying Bun installation...");
+  const verifyResult = await sandbox.runCommand("sh", [
+    "-c",
+    'export PATH="$HOME/.bun/bin:$PATH" && bun --version',
+  ]);
+
+  if (verifyResult.exitCode === 0) {
+    const version = await verifyResult.stdout();
+    logs.push(`Bun ${version.trim()} installed successfully`);
+  }
 
   return {
     success: installResult.exitCode === 0,
@@ -374,16 +398,20 @@ export async function* buildCode(
   code: string,
   sandboxId: string,
 ): AsyncGenerator<{ type: "log" | "error" | "done"; data: string }> {
+  yield { type: "log", data: "Connecting to sandbox..." };
   const sandbox = await getOrReconnectSandbox(sandboxId);
 
   // Ensure build directories exist
+  yield { type: "log", data: "Creating build directories..." };
   await sandbox.runCommand("mkdir", ["-p", "/tmp/src", "/tmp/dist"]);
 
   // Ensure SDK is available for bundling
   yield { type: "log", data: "Setting up @faas/sdk..." };
   await ensureSdk(sandboxId);
+  yield { type: "log", data: "SDK ready" };
 
   // Write user code to source file
+  yield { type: "log", data: "Writing source code..." };
   await sandbox.writeFiles([
     {
       path: "/tmp/src/handler.ts",
@@ -394,7 +422,7 @@ export async function* buildCode(
   yield { type: "log", data: "Source code written to /tmp/src/handler.ts" };
 
   // Install Bun if needed
-  yield { type: "log", data: "Checking Bun installation..." };
+  yield { type: "log", data: "Checking Bun runtime..." };
   const installResult = await installBun(sandboxId);
   for (const log of installResult.logs) {
     yield { type: "log", data: log };
