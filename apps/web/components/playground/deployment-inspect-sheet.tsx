@@ -114,20 +114,20 @@ export function DeploymentInspectSheet({
         {/* Tab Content */}
         <div className="flex-1 overflow-auto">
           {activeTab === "details" && deployment && (
-            <div className="space-y-4 p-4">
-              <div className="grid grid-cols-2 gap-4 text-sm">
+            <div className="space-y-4 p-3 md:p-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 md:gap-4 text-sm">
                 <div>
-                  <div className="text-muted-foreground mb-1">Status</div>
+                  <div className="text-muted-foreground mb-1 text-xs md:text-sm">Status</div>
                   <div>{getDeploymentStatusBadge(deployment.status)}</div>
                 </div>
                 <div>
-                  <div className="text-muted-foreground mb-1">Created</div>
+                  <div className="text-muted-foreground mb-1 text-xs md:text-sm">Created</div>
                   <div className="font-mono text-xs">
                     {new Date(deployment.createdAt).toLocaleString()}
                   </div>
                 </div>
-                <div className="col-span-2">
-                  <div className="text-muted-foreground mb-1">Function URL</div>
+                <div className="sm:col-span-2">
+                  <div className="text-muted-foreground mb-1 text-xs md:text-sm">Function URL</div>
                   {deployment.status === "ready" ? (
                     <div className="flex items-center gap-2">
                       <code className="text-xs bg-muted px-2 py-1 rounded flex-1 truncate">
@@ -145,16 +145,16 @@ export function DeploymentInspectSheet({
                     <span className="text-muted-foreground text-xs">Not available</span>
                   )}
                 </div>
-                <div className="col-span-2">
-                  <div className="text-muted-foreground mb-1">Deployment URL</div>
+                <div className="sm:col-span-2">
+                  <div className="text-muted-foreground mb-1 text-xs md:text-sm">Deployment URL</div>
                   <code className="text-xs bg-muted px-2 py-1 rounded block truncate">
                     {deployment.url}
                   </code>
                 </div>
-                <div className="col-span-2">
-                  <div className="text-muted-foreground mb-1">Schedule Run</div>
+                <div className="sm:col-span-2">
+                  <div className="text-muted-foreground mb-1 text-xs md:text-sm">Schedule Run</div>
                   {deployment.cronSchedule ? (
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <code className="text-xs bg-muted px-2 py-1 rounded">
                         {deployment.cronSchedule}
                       </code>
@@ -168,8 +168,8 @@ export function DeploymentInspectSheet({
                     <span className="text-xs text-muted-foreground">None</span>
                   )}
                 </div>
-                <div className="col-span-2">
-                  <div className="text-muted-foreground mb-1">Regions</div>
+                <div className="sm:col-span-2">
+                  <div className="text-muted-foreground mb-1 text-xs md:text-sm">Regions</div>
                   {deployment.regions && deployment.regions.length > 0 ? (
                     <div className="flex flex-wrap gap-1">
                       {deployment.regions.map((region) => {
@@ -178,7 +178,7 @@ export function DeploymentInspectSheet({
                           <Badge key={region} variant="outline" className="text-xs">
                             {region}
                             {regionInfo && (
-                              <span className="ml-1 text-muted-foreground">
+                              <span className="ml-1 text-muted-foreground hidden sm:inline">
                                 ({regionInfo.label})
                               </span>
                             )}
@@ -191,8 +191,8 @@ export function DeploymentInspectSheet({
                   )}
                 </div>
                 {deployment.errorMessage && (
-                  <div className="col-span-2">
-                    <div className="text-muted-foreground mb-1">Error</div>
+                  <div className="sm:col-span-2">
+                    <div className="text-muted-foreground mb-1 text-xs md:text-sm">Error</div>
                     <div className="text-destructive text-xs bg-destructive/10 p-2 rounded">
                       {deployment.errorMessage}
                     </div>

@@ -19,6 +19,7 @@ import { FooterActions } from "./footer-actions";
 import { DeploymentInspectSheet } from "./deployment-inspect-sheet";
 
 type InspectTab = "details" | "logs";
+type MobilePanel = "editor" | "output";
 
 export default function Playground() {
   // Core state from hooks
@@ -46,6 +47,7 @@ export default function Playground() {
     null
   );
   const [inspectTab, setInspectTab] = useState<InspectTab>("details");
+  const [mobilePanel, setMobilePanel] = useState<MobilePanel>("editor");
 
   // Combine loading states
   const loading = sessionLoading || execLoading;
@@ -246,10 +248,38 @@ export default function Playground() {
         onRestart={handleCreateSession}
       />
 
-      <main className="flex-1 flex min-h-0">
-        <CodeEditorPanel code={code} onChange={setCode} onFormat={handleFormatCode} />
+      {/* Mobile Panel Tabs - visible only on mobile */}
+      <div className="md:hidden shrink-0 flex border-b border-border">
+        <button
+          onClick={() => setMobilePanel("editor")}
+          className={`flex-1 px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+            mobilePanel === "editor"
+              ? "border-primary text-foreground"
+              : "border-transparent text-muted-foreground"
+          }`}
+        >
+          Editor
+        </button>
+        <button
+          onClick={() => setMobilePanel("output")}
+          className={`flex-1 px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+            mobilePanel === "output"
+              ? "border-primary text-foreground"
+              : "border-transparent text-muted-foreground"
+          }`}
+        >
+          Output
+        </button>
+      </div>
 
-        <div className="w-1/2 flex flex-col min-h-0">
+      <main className="flex-1 flex flex-col md:flex-row min-h-0">
+        {/* Code Editor - hidden on mobile when output tab is active */}
+        <div className={`${mobilePanel === "editor" ? "flex" : "hidden"} md:flex w-full md:w-1/2 flex-col min-h-0`}>
+          <CodeEditorPanel code={code} onChange={setCode} onFormat={handleFormatCode} />
+        </div>
+
+        {/* Output & Deployments - hidden on mobile when editor tab is active */}
+        <div className={`${mobilePanel === "output" ? "flex" : "hidden"} md:flex w-full md:w-1/2 flex-col min-h-0`}>
           <OutputPanel outputs={outputs} onClear={() => setOutputs([])} />
 
           <DeploymentsPanel

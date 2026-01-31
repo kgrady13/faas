@@ -22,16 +22,16 @@ export function OutputPanel({ outputs, onClear }: OutputPanelProps) {
   }, [outputs]);
 
   return (
-    <div className="flex-1 flex flex-col min-h-0 border-b border-border">
+    <div className="flex-1 flex flex-col min-h-0 border-b border-border md:border-b-0">
       <div className="shrink-0 px-3 py-2 border-b border-border text-sm text-muted-foreground flex items-center justify-between">
-        <span>Output</span>
+        <span className="hidden md:inline">Output</span>
         <Button variant="ghost" size="xs" onClick={onClear}>
           Clear
         </Button>
       </div>
       <div
         ref={outputRef}
-        className="flex-1 min-h-0 p-4 font-mono text-sm overflow-auto bg-muted/30"
+        className="flex-1 min-h-0 p-3 md:p-4 font-mono text-xs md:text-sm overflow-auto bg-muted/30"
       >
         {outputs.length === 0 ? (
           <RotatingText text={["Go on...try something new", "Output will appear here..."]} />

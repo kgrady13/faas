@@ -41,48 +41,52 @@ export function FooterActions({
   onDeploy,
 }: FooterActionsProps) {
   return (
-    <footer className="shrink-0 border-t border-border px-4 py-3 flex flex-nowrap items-center gap-2 overflow-x-auto bg-background relative z-10">
+    <footer className="shrink-0 border-t border-border px-2 py-2 md:px-4 md:py-3 flex flex-wrap md:flex-nowrap items-center gap-1.5 md:gap-2 bg-background relative z-10">
       <Button
         variant="outline"
+        size="sm"
         onClick={onNewSession}
         disabled={loading !== null}
-        className="gap-2"
+        className="gap-1 md:gap-2 text-xs md:text-sm"
       >
-        {loading === "create" ? "Creating..." : "New Session"}
-        <kbd className="inline-flex h-5 max-h-full items-center rounded bg-black/10 dark:bg-white/10 px-1.5 font-[inherit] text-[0.625rem] ring-1 ring-black/10 dark:ring-white/20 ring-inset">
+        {loading === "create" ? "Creating..." : "New"}
+        <kbd className="hidden md:inline-flex h-5 max-h-full items-center rounded bg-black/10 dark:bg-white/10 px-1.5 font-[inherit] text-[0.625rem] ring-1 ring-black/10 dark:ring-white/20 ring-inset">
           N
         </kbd>
       </Button>
 
       <Button
+        size="sm"
         onClick={onRun}
         disabled={loading !== null || !sessionRunning}
-        className="gap-2"
+        className="gap-1 md:gap-2 text-xs md:text-sm"
       >
         {loading === "run" ? "Running..." : "Run"}
-        <kbd className="inline-flex h-5 max-h-full items-center rounded bg-white/15 px-1.5 font-[inherit] text-[0.625rem] ring-1 ring-white/20 ring-inset">
+        <kbd className="hidden md:inline-flex h-5 max-h-full items-center rounded bg-white/15 px-1.5 font-[inherit] text-[0.625rem] ring-1 ring-white/20 ring-inset">
           R
         </kbd>
       </Button>
 
-      <div className="w-px h-6 bg-border mx-1" />
+      <div className="hidden md:block w-px h-6 bg-border mx-1" />
 
       <Button
+        size="sm"
         onClick={onDeploy}
         disabled={loading !== null || !sessionRunning}
-        className="gap-2"
+        className="gap-1 md:gap-2 text-xs md:text-sm"
       >
         {loading === "deploy" ? "Deploying..." : "Deploy"}
-        <kbd className="inline-flex h-5 max-h-full items-center rounded bg-white/15 px-1.5 font-[inherit] text-[0.625rem] ring-1 ring-white/20 ring-inset">
+        <kbd className="hidden md:inline-flex h-5 max-h-full items-center rounded bg-white/15 px-1.5 font-[inherit] text-[0.625rem] ring-1 ring-white/20 ring-inset">
           D
         </kbd>
       </Button>
 
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="outline" size="sm" className="gap-1.5">
-            <Clock className="size-3.5" />
-            {getCronLabel(cronSchedule) || "Schedule Run"}
+          <Button variant="outline" size="sm" className="gap-1 md:gap-1.5 text-xs md:text-sm">
+            <Clock className="size-3 md:size-3.5" />
+            <span className="hidden sm:inline">{getCronLabel(cronSchedule) || "Schedule"}</span>
+            <span className="sm:hidden">Cron</span>
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent
@@ -108,8 +112,15 @@ export function FooterActions({
 
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="outline" size="sm">
-            {regions.length > 0 ? `Regions (${regions.length})` : "Regions"}
+          <Button variant="outline" size="sm" className="text-xs md:text-sm">
+            {regions.length > 0 ? (
+              <>
+                <span className="hidden sm:inline">Regions ({regions.length})</span>
+                <span className="sm:hidden">{regions.length}</span>
+              </>
+            ) : (
+              "Regions"
+            )}
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent
@@ -142,11 +153,11 @@ export function FooterActions({
         </DropdownMenuContent>
       </DropdownMenu>
 
-      <div className="flex-1" />
+      <div className="hidden md:block flex-1" />
 
       {remainingTime > 0 && remainingTime < 60000 && sessionRunning && (
-        <span className="text-sm text-destructive">
-          Warning: Session expires soon!
+        <span className="text-xs md:text-sm text-destructive w-full md:w-auto text-center md:text-left order-first md:order-none mb-1 md:mb-0">
+          Session expires soon!
         </span>
       )}
 
@@ -154,10 +165,10 @@ export function FooterActions({
         href="https://github.com/kgrady13/faas.git"
         target="_blank"
         rel="noopener noreferrer"
-        className="text-muted-foreground hover:text-foreground transition-colors"
+        className="text-muted-foreground hover:text-foreground transition-colors ml-auto md:ml-0"
         aria-label="View on GitHub"
       >
-        <Github className="size-5" />
+        <Github className="size-4 md:size-5" />
       </a>
     </footer>
   );
