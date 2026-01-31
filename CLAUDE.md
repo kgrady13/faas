@@ -6,10 +6,11 @@ This is a white-labeled FaaS platform allowing users to write, test, and deploy 
 
 ## Monorepo Structure
 
-This is a **Turborepo monorepo** with the following apps:
+This is a **Turborepo monorepo** with the following packages:
 
 - **@faas/web** (`apps/web/`) - Next.js FaaS platform UI
 - **@faas/deployments** (`apps/deployments/`) - Vercel deployment target for user functions
+- **@faas/sdk** (`packages/sdk/`) - Worker SDK for defining capabilities (sync, automation, skill)
 
 ## Vercel Projects
 
@@ -28,11 +29,11 @@ The web app deploys user functions TO the `faas-deployments` project via the Ver
 - **Framework**: Next.js 16.1.4 with React 19.2.3
 - **Styling**: Tailwind CSS 4 (via @tailwindcss/postcss)
 - **UI Components**: Shadcn/ui + Radix UI + Base UI
-- **Code Editor**: Monaco Editor (@monaco-editor/react)
+- **Code Editor**: Monaco Editor (@monaco-editor/react) with SDK type definitions
 - **Animations**: Motion 12.x
 - **Storage**: Upstash Redis for deployment metadata
-- **Sandbox**: @vercel/sandbox SDK with Node.js 24 runtime (for testing)
-- **Build Tool**: Bun (installed in sandbox for bundling)
+- **Sandbox**: @vercel/sandbox SDK with Bun runtime (for both testing and bundling)
+- **SDK**: @faas/sdk - Worker class with capability types (pre-installed in sandbox)
 - **Deployed Runtime**: Vercel Bun runtime (`bun1.x`)
 - **Package Manager**: Bun
 
@@ -57,10 +58,55 @@ cd apps/web && bun tsc --noEmit   # Type check web app
 
 ### Sandbox Execution
 
-- Uses `@vercel/sandbox` SDK with `node24` runtime
-- TypeScript supported natively via `--experimental-strip-types` flag
-- Code saved as `.ts` files and executed directly
+- Uses `@vercel/sandbox` SDK with Bun runtime for both testing and building
+- Bun installed on-demand via curl (`curl -fsSL https://bun.sh/install | bash`)
+- **@faas/sdk is pre-installed** in sandbox's `/tmp/node_modules/@faas/sdk/`
+- Code written to `/tmp/src/handler.ts` and executed with `bun run`
 - Streaming output via SSE using `detached: true` mode and `command.logs()` iterator
+- SDK files are copied from the web app's `node_modules` into the sandbox via `ensureSdk()`
+
+### SDK (@faas/sdk)
+
+The SDK provides the `Worker` class for defining serverless function capabilities:
+
+```typescript
+import { createWorker } from "@faas/sdk";
+
+const worker = createWorker();
+
+// Skill - callable by Notion agents
+worker.addCapability({
+  type: "skill",
+  name: "greet",
+  execute: async (input: { name: string }) => {
+    return { message: `Hello, ${input.name}!` };
+  },
+});
+
+// Sync - imports external data into Notion
+worker.addCapability({
+  type: "sync",
+  name: "fetchData",
+  sync: async () => { /* sync logic */ },
+});
+
+// Automation - responds to Notion events
+worker.addCapability({
+  type: "automation",
+  name: "onPageChange",
+  trigger: "page_changed",
+  run: async (event) => { /* handle event */ },
+});
+
+export default worker;
+```
+
+**Capability Types:**
+- `SkillCapability<TInput, TOutput>` - Functions callable by agents (generic for type-safe I/O)
+- `SyncCapability` - Data sync operations
+- `AutomationCapability` - Event-triggered automations (page_changed, database_changed)
+
+**Monaco Integration:** SDK types are injected via `beforeMount` in `code-editor-panel.tsx` for full intellisense.
 
 ### Deployment Store
 
@@ -73,6 +119,8 @@ cd apps/web && bun tsc --noEmit   # Type check web app
 - Bun installed on-demand **inside the sandbox** via curl (`curl -fsSL https://bun.sh/install | bash`)
 - Uses `bun build` with `--target=bun` for Bun runtime compatibility
 - Bun handles TypeScript natively - no separate transpilation needed
+- **@faas/sdk is pre-installed** in `/tmp/node_modules/` before bundling
+- Bun resolves and inlines SDK imports into the final bundle
 - Output path: `/tmp/dist/index.js`
 - Source path: `/tmp/src/handler.ts`
 
@@ -80,13 +128,13 @@ cd apps/web && bun tsc --noEmit   # Type check web app
 
 **Key insight**: Vercel's **Bun runtime** (`bun1.x`) natively supports Web Standard `Request/Response` handlers - no wrapper needed!
 
-```javascript
-// User writes (and this deploys as-is):
-export default {
-  async fetch(request: Request): Promise<Response> {
-    return new Response('Hello World');
-  }
-};
+```typescript
+// User writes Worker code that gets bundled with SDK:
+import { createWorker } from "@faas/sdk";
+
+const worker = createWorker();
+worker.addCapability({ type: "skill", name: "hello", execute: async () => ({ message: "Hi!" }) });
+export default worker;
 ```
 
 **Build Output API v3 Structure**:
@@ -224,5 +272,13 @@ faas/                           # Monorepo root
 │       ├── .env.local          # Local environment (gitignored)
 │       ├── vercel.json         # Vercel config (bunVersion: 1.x)
 │       └── package.json
-└── packages/                   # Shared packages (future use)
+└── packages/
+    └── sdk/                    # @faas/sdk - Worker SDK
+        ├── package.json        # Exports dist/index.js
+        ├── tsconfig.json
+        ├── src/
+        │   └── index.ts        # Worker class, capability types, createWorker()
+        └── dist/
+            ├── index.js        # Bundled ESM output (bun build)
+            └── index.d.ts      # TypeScript declarations
 ```

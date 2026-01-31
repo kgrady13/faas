@@ -47,7 +47,7 @@ export function DeploymentsPanel({
   onDelete,
 }: DeploymentsPanelProps) {
   return (
-    <div className="h-48 shrink-0 flex flex-col">
+    <div className="h-32 md:h-48 shrink-0 flex flex-col">
       <div className="shrink-0 px-3 py-2 border-b border-border text-sm text-muted-foreground flex items-center justify-between">
         <span>Deployed Functions ({deployments.length})</span>
         <Button variant="ghost" size="xs" onClick={onRefresh}>

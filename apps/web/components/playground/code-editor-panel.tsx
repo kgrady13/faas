@@ -2,6 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { useTheme } from "next-themes";
+import type { Monaco } from "@monaco-editor/react";
 import { Button } from "@/components/ui/button";
 import { Shimmer } from "@/components/ai-elements/shimmer";
 import { minDelay } from "@/lib/utils";
@@ -20,17 +21,81 @@ const Editor = dynamic(
   }
 );
 
+// SDK type definitions for Monaco intellisense
+const SDK_TYPES = `declare module "@faas/sdk" {
+  export interface Capability {
+    name: string;
+    description?: string;
+  }
+
+  export interface SyncCapability extends Capability {
+    type: "sync";
+    sync: () => Promise<void>;
+  }
+
+  export interface AutomationCapability extends Capability {
+    type: "automation";
+    trigger: "page_changed" | "database_changed";
+    run: (event: AutomationEvent) => Promise<void>;
+  }
+
+  export interface SkillCapability<TInput = any, TOutput = any> extends Capability {
+    type: "skill";
+    execute: (input: TInput) => Promise<TOutput>;
+  }
+
+  export type WorkerCapability = SyncCapability | AutomationCapability | SkillCapability<any, any>;
+
+  export interface AutomationEvent {
+    type: "page_changed" | "database_changed";
+    targetId: string;
+    timestamp: string;
+    metadata?: Record<string, unknown>;
+  }
+
+  export class Worker {
+    addCapability(capability: WorkerCapability): this;
+    getCapabilities(): WorkerCapability[];
+    getCapability(name: string): WorkerCapability | undefined;
+    hasCapability(name: string): boolean;
+    fetch(request: Request): Promise<Response>;
+  }
+
+  export function createWorker(): Worker;
+}`;
+
+function handleEditorWillMount(monaco: Monaco) {
+  // Configure TypeScript compiler options
+  monaco.languages.typescript.typescriptDefaults.setCompilerOptions({
+    target: monaco.languages.typescript.ScriptTarget.ESNext,
+    module: monaco.languages.typescript.ModuleKind.ESNext,
+    moduleResolution: monaco.languages.typescript.ModuleResolutionKind.NodeJs,
+    allowNonTsExtensions: true,
+    strict: true,
+    esModuleInterop: true,
+  });
+
+  // Add SDK type definitions
+  monaco.languages.typescript.typescriptDefaults.addExtraLib(
+    SDK_TYPES,
+    "file:///node_modules/@faas/sdk/index.d.ts"
+  );
+}
+
+type MobileView = "editor" | "output";
+
 interface CodeEditorPanelProps {
   code: string;
   onChange: (code: string) => void;
   onFormat: () => void;
+  mobileView: MobileView;
 }
 
-export function CodeEditorPanel({ code, onChange, onFormat }: CodeEditorPanelProps) {
+export function CodeEditorPanel({ code, onChange, onFormat, mobileView }: CodeEditorPanelProps) {
   const { resolvedTheme } = useTheme();
 
   return (
-    <div className="w-1/2 border-r border-border flex flex-col min-h-0">
+    <div className={`w-full md:w-1/2 border-r border-border flex flex-col min-h-0 flex-1 md:flex-initial ${mobileView === "output" ? "hidden md:flex" : "flex"}`}>
       <div className="shrink-0 px-3 py-2 text-sm text-muted-foreground flex items-center justify-between">
         <span>Code Editor</span>
         <Button variant="ghost" size="xs" onClick={onFormat}>
@@ -44,6 +109,7 @@ export function CodeEditorPanel({ code, onChange, onFormat }: CodeEditorPanelPro
         onChange={(value) => onChange(value || "")}
         theme={resolvedTheme === "dark" ? "vs-dark" : "light"}
         loading={null}
+        beforeMount={handleEditorWillMount}
         options={{
           minimap: { enabled: false },
           fontSize: 14,

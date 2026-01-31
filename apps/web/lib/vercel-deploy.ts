@@ -85,7 +85,12 @@ export function generateBuildOutput(
     crons?: { path: string; schedule: string }[];
   } = {
     version: 3,
-    routes: [{ src: `/api/${functionName}`, dest: `/api/${functionName}` }],
+    routes: [
+      // Match sub-paths like /api/handler/skill/greet -> /api/handler
+      { src: `/api/${functionName}/(.*)`, dest: `/api/${functionName}` },
+      // Match base path /api/handler -> /api/handler
+      { src: `/api/${functionName}`, dest: `/api/${functionName}` },
+    ],
   };
 
   if (cronSchedule) {

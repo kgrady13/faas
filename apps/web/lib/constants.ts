@@ -53,43 +53,49 @@ export const REGION_OPTIONS: RegionOption[] = [
 
 /**
  * Default code template for new sessions
- * Uses Bun-style handler format for Vercel Bun runtime
+ * Uses the @faas/sdk Worker pattern
  */
-export const DEFAULT_CODE = `// Bun Handler for Vercel Fluid Compute
-// Click "Run" to test, "Deploy" for Vercel Bun runtime
+export const DEFAULT_CODE = `import { createWorker } from "@faas/sdk";
 
-console.log("Hello World");
+// Create a new worker instance
+const worker = createWorker();
 
+// Add a skill capability that the faas SDK can invoke
+worker.addCapability({
+  type: "skill",
+  name: "greet",
+  description: "Returns a personalized greeting",
+  execute: async (input: { name?: string }) => {
+    const name = input?.name || "World";
+    return { message: \`Hello, \${name}!\` };
+  },
+});
+
+// Add a sync capability for importing external data
+worker.addCapability({
+  type: "sync",
+  name: "fetchData",
+  description: "Syncs external data into the faas platform",
+  sync: async () => {
+    console.log("Syncing data...");
+    // Your sync logic here
+  },
+});
+
+// Export as a server (plain object with fetch for Vercel Bun runtime)
 export default {
-  async fetch(request: Request): Promise<Response> {
-    // Use base URL for relative paths (Vercel passes relative URLs)
-    const url = new URL(request.url, "http://localhost");
-
-    console.log("Hello From Handler");
-
-    if (request.method === "GET") {
-      return new Response(JSON.stringify({
-        message: "Hello from Vercel Fluid Compute!",
-        timestamp: new Date().toISOString(),
-        path: url.pathname,
-      }), {
-        headers: { "Content-Type": "application/json" }
-      });
-    }
-
-    if (request.method === "POST") {
-      const body = await request.json();
-      return new Response(JSON.stringify({
-        received: body,
-        processed: true,
-      }), {
-        headers: { "Content-Type": "application/json" }
-      });
-    }
-
-    return new Response("Method not allowed", { status: 405 });
-  }
+  fetch: (req: Request) => worker.fetch(req),
 };
+
+// Test the worker locally
+console.log("Worker capabilities:", worker.getCapabilities().map(c => c.name));
+
+const greet = worker.getCapability("greet");
+if (greet?.type === "skill") {
+  greet.execute({ name: "Developer" }).then(result => {
+    console.log("Skill result:", result);
+  });
+}
 `;
 
 /**
@@ -97,7 +103,9 @@ export default {
  * @param cronExpression - The cron expression to look up
  * @returns The label if found, null otherwise
  */
-export function getCronLabel(cronExpression: string | undefined): string | null {
+export function getCronLabel(
+  cronExpression: string | undefined,
+): string | null {
   if (!cronExpression) return null;
   const preset = CRON_PRESETS.find((p) => p.value === cronExpression);
   return preset?.label || null;

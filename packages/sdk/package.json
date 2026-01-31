@@ -1,0 +1,20 @@
+{
+  "name": "@faas/sdk",
+  "version": "0.0.1",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "bun build src/index.ts --outdir=dist --target=bun && bun run build:types",
+    "build:types": "tsc --emitDeclarationOnly --declaration --outDir dist"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.3"
+  }
+}
