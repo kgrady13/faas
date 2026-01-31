@@ -47,40 +47,40 @@ export function DeploymentsPanel({
   onDelete,
 }: DeploymentsPanelProps) {
   return (
-    <div className="h-32 md:h-48 shrink-0 flex flex-col border-t border-border md:border-t-0">
+    <div className="h-32 md:h-48 shrink-0 flex flex-col">
       <div className="shrink-0 px-3 py-2 border-b border-border text-sm text-muted-foreground flex items-center justify-between">
-        <span className="text-xs md:text-sm">Deployments ({deployments.length})</span>
+        <span>Deployed Functions ({deployments.length})</span>
         <Button variant="ghost" size="xs" onClick={onRefresh}>
           Refresh
         </Button>
       </div>
       <div className="flex-1 overflow-auto">
         {deployments.length === 0 ? (
-          <div className="p-3 md:p-4 text-xs md:text-sm text-muted-foreground">
-            No deployments yet. Deploy your code to see them here.
+          <div className="p-4 text-sm text-muted-foreground">
+            No deployments yet. Build and deploy your code to see them here.
           </div>
         ) : (
           <div className="divide-y divide-border">
             {deployments.map((deployment) => (
               <div
                 key={deployment.id}
-                className="p-2 md:p-3 flex items-center gap-2 md:gap-3 text-xs md:text-sm"
+                className="p-3 flex items-center gap-3 text-sm"
               >
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-1.5 md:gap-2 flex-wrap">
-                    <span className="font-medium truncate text-xs md:text-sm">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-medium truncate">
                       {deployment.functionName}
                     </span>
                     {getDeploymentStatusBadge(deployment.status)}
                     {deployment.cronSchedule && (
-                      <span className="hidden md:flex items-center gap-1">
-                        <Clock className="size-3 text-muted-foreground" />
+                      <>
+                        <Clock className="size-3 -mr-1 text-muted-foreground" />
                         <span className="text-xs text-muted-foreground">cron</span>
-                      </span>
+                      </>
                     )}
                     {deployment.regions && deployment.regions.length > 0 && (
-                      <div className="hidden md:flex items-center gap-1">
-                        {deployment.regions.slice(0, 2).map((region) => (
+                      <div className="flex items-center gap-1">
+                        {deployment.regions.slice(0, 3).map((region) => (
                           <Badge
                             key={region}
                             variant="outline"
@@ -89,49 +89,47 @@ export function DeploymentsPanel({
                             {region}
                           </Badge>
                         ))}
-                        {deployment.regions.length > 2 && (
+                        {deployment.regions.length > 3 && (
                           <span className="text-xs text-muted-foreground">
-                            +{deployment.regions.length - 2}
+                            +{deployment.regions.length - 3}
                           </span>
                         )}
                       </div>
                     )}
                   </div>
                   {deployment.status === "ready" && (
-                    <div className="hidden md:block text-xs text-muted-foreground truncate mt-0.5">
+                    <div className="text-xs text-muted-foreground truncate mt-0.5">
                       {deployment.functionUrl}
                     </div>
                   )}
                   {deployment.errorMessage && (
-                    <div className="text-xs text-destructive mt-0.5 truncate">
+                    <div className="text-xs text-destructive mt-0.5">
                       {deployment.errorMessage}
                     </div>
                   )}
                 </div>
-                <div className="flex items-center gap-0.5 md:gap-1 shrink-0">
+                <div className="flex items-center gap-1">
                   {deployment.status === "ready" && (
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="size-6 md:size-7"
+                      className="size-7"
                       onClick={() => onCopyUrl(deployment.functionUrl)}
                     >
-                      <Copy className="size-3 md:size-3.5" />
+                      <Copy className="size-3.5" />
                     </Button>
                   )}
                   <Button
                     variant="ghost"
                     size="xs"
-                    className="text-xs px-2"
                     onClick={() => onInspect(deployment)}
                   >
-                    <span className="hidden md:inline">Inspect</span>
-                    <span className="md:hidden">View</span>
+                    Inspect
                   </Button>
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <Button variant="ghost" size="icon" className="size-6 md:size-7">
-                        <MoreVertical className="size-3 md:size-3.5" />
+                      <Button variant="ghost" size="icon" className="size-7">
+                        <MoreVertical className="size-3.5" />
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="text-xs">

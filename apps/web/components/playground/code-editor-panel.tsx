@@ -82,19 +82,22 @@ function handleEditorWillMount(monaco: Monaco) {
   );
 }
 
+type MobileView = "editor" | "output";
+
 interface CodeEditorPanelProps {
   code: string;
   onChange: (code: string) => void;
   onFormat: () => void;
+  mobileView: MobileView;
 }
 
-export function CodeEditorPanel({ code, onChange, onFormat }: CodeEditorPanelProps) {
+export function CodeEditorPanel({ code, onChange, onFormat, mobileView }: CodeEditorPanelProps) {
   const { resolvedTheme } = useTheme();
 
   return (
-    <div className="flex-1 md:border-r border-b md:border-b-0 border-border flex flex-col min-h-0">
+    <div className={`w-full md:w-1/2 border-r border-border flex flex-col min-h-0 flex-1 md:flex-initial ${mobileView === "output" ? "hidden md:flex" : "flex"}`}>
       <div className="shrink-0 px-3 py-2 text-sm text-muted-foreground flex items-center justify-between">
-        <span className="hidden md:inline">Code Editor</span>
+        <span>Code Editor</span>
         <Button variant="ghost" size="xs" onClick={onFormat}>
           Format
         </Button>

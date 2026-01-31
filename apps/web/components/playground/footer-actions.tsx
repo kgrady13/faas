@@ -12,8 +12,10 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuCheckboxItem,
 } from "@/components/ui/dropdown-menu";
-import { Clock, Github } from "lucide-react";
+import { Clock, Github, Code, Terminal, Play, Rocket, Plus } from "lucide-react";
 import { CRON_PRESETS, REGION_OPTIONS, getCronLabel } from "@/lib/constants";
+
+type MobileView = "editor" | "output";
 
 interface FooterActionsProps {
   loading: string | null;
@@ -21,6 +23,8 @@ interface FooterActionsProps {
   remainingTime: number;
   cronSchedule: string;
   regions: string[];
+  mobileView: MobileView;
+  onMobileViewChange: (view: MobileView) => void;
   onCronScheduleChange: (value: string) => void;
   onRegionsChange: (regions: string[]) => void;
   onNewSession: () => void;
@@ -34,6 +38,8 @@ export function FooterActions({
   remainingTime,
   cronSchedule,
   regions,
+  mobileView,
+  onMobileViewChange,
   onCronScheduleChange,
   onRegionsChange,
   onNewSession,
@@ -41,52 +47,87 @@ export function FooterActions({
   onDeploy,
 }: FooterActionsProps) {
   return (
-    <footer className="shrink-0 border-t border-border px-2 py-2 md:px-4 md:py-3 flex flex-wrap md:flex-nowrap items-center gap-1.5 md:gap-2 bg-background relative z-10">
+    <footer className="shrink-0 border-t border-border px-2 md:px-4 py-2 md:py-3 flex flex-nowrap items-center gap-1.5 md:gap-2 overflow-x-auto bg-background relative z-10">
+      {/* Mobile View Toggle - Only shown on mobile */}
+      <div className="flex md:hidden border border-border rounded-md p-0.5">
+        <Button
+          variant={mobileView === "editor" ? "default" : "ghost"}
+          size="sm"
+          onClick={() => onMobileViewChange("editor")}
+          className="h-7 px-2 gap-1"
+        >
+          <Code className="size-3.5" />
+          <span className="text-xs">Code</span>
+        </Button>
+        <Button
+          variant={mobileView === "output" ? "default" : "ghost"}
+          size="sm"
+          onClick={() => onMobileViewChange("output")}
+          className="h-7 px-2 gap-1"
+        >
+          <Terminal className="size-3.5" />
+          <span className="text-xs">Output</span>
+        </Button>
+      </div>
+
+      {/* Divider - mobile only */}
+      <div className="w-px h-6 bg-border mx-0.5 md:hidden" />
+
+      {/* New Session Button */}
       <Button
         variant="outline"
         size="sm"
         onClick={onNewSession}
         disabled={loading !== null}
-        className="gap-1 md:gap-2 text-xs md:text-sm"
+        className="gap-1.5 h-8 md:h-9 px-2 md:px-3"
       >
-        {loading === "create" ? "Creating..." : "New"}
+        <Plus className="size-3.5 md:hidden" />
+        <span className="hidden md:inline">{loading === "create" ? "Creating..." : "New Session"}</span>
+        <span className="md:hidden text-xs">{loading === "create" ? "..." : "New"}</span>
         <kbd className="hidden md:inline-flex h-5 max-h-full items-center rounded bg-black/10 dark:bg-white/10 px-1.5 font-[inherit] text-[0.625rem] ring-1 ring-black/10 dark:ring-white/20 ring-inset">
           N
         </kbd>
       </Button>
 
+      {/* Run Button */}
       <Button
         size="sm"
         onClick={onRun}
         disabled={loading !== null || !sessionRunning}
-        className="gap-1 md:gap-2 text-xs md:text-sm"
+        className="gap-1.5 h-8 md:h-9 px-2 md:px-3"
       >
-        {loading === "run" ? "Running..." : "Run"}
+        <Play className="size-3.5 md:hidden" />
+        <span className="hidden md:inline">{loading === "run" ? "Running..." : "Run"}</span>
+        <span className="md:hidden text-xs">{loading === "run" ? "..." : "Run"}</span>
         <kbd className="hidden md:inline-flex h-5 max-h-full items-center rounded bg-white/15 px-1.5 font-[inherit] text-[0.625rem] ring-1 ring-white/20 ring-inset">
           R
         </kbd>
       </Button>
 
-      <div className="hidden md:block w-px h-6 bg-border mx-1" />
+      {/* Divider */}
+      <div className="w-px h-6 bg-border mx-0.5 md:mx-1" />
 
+      {/* Deploy Button */}
       <Button
         size="sm"
         onClick={onDeploy}
         disabled={loading !== null || !sessionRunning}
-        className="gap-1 md:gap-2 text-xs md:text-sm"
+        className="gap-1.5 h-8 md:h-9 px-2 md:px-3"
       >
-        {loading === "deploy" ? "Deploying..." : "Deploy"}
+        <Rocket className="size-3.5 md:hidden" />
+        <span className="hidden md:inline">{loading === "deploy" ? "Deploying..." : "Deploy"}</span>
+        <span className="md:hidden text-xs">{loading === "deploy" ? "..." : "Deploy"}</span>
         <kbd className="hidden md:inline-flex h-5 max-h-full items-center rounded bg-white/15 px-1.5 font-[inherit] text-[0.625rem] ring-1 ring-white/20 ring-inset">
           D
         </kbd>
       </Button>
 
+      {/* Schedule Dropdown - Hidden on mobile */}
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="outline" size="sm" className="gap-1 md:gap-1.5 text-xs md:text-sm">
-            <Clock className="size-3 md:size-3.5" />
-            <span className="hidden sm:inline">{getCronLabel(cronSchedule) || "Schedule"}</span>
-            <span className="sm:hidden">Cron</span>
+          <Button variant="outline" size="sm" className="gap-1.5 hidden md:flex">
+            <Clock className="size-3.5" />
+            {getCronLabel(cronSchedule) || "Schedule Run"}
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent
@@ -110,17 +151,11 @@ export function FooterActions({
         </DropdownMenuContent>
       </DropdownMenu>
 
+      {/* Regions Dropdown - Hidden on mobile */}
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="outline" size="sm" className="text-xs md:text-sm">
-            {regions.length > 0 ? (
-              <>
-                <span className="hidden sm:inline">Regions ({regions.length})</span>
-                <span className="sm:hidden">{regions.length}</span>
-              </>
-            ) : (
-              "Regions"
-            )}
+          <Button variant="outline" size="sm" className="hidden md:flex">
+            {regions.length > 0 ? `Regions (${regions.length})` : "Regions"}
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent
@@ -153,22 +188,24 @@ export function FooterActions({
         </DropdownMenuContent>
       </DropdownMenu>
 
-      <div className="hidden md:block flex-1" />
+      <div className="flex-1" />
 
+      {/* Session Warning - Hidden on mobile */}
       {remainingTime > 0 && remainingTime < 60000 && sessionRunning && (
-        <span className="text-xs md:text-sm text-destructive w-full md:w-auto text-center md:text-left order-first md:order-none mb-1 md:mb-0">
-          Session expires soon!
+        <span className="hidden md:inline text-sm text-destructive">
+          Warning: Session expires soon!
         </span>
       )}
 
+      {/* GitHub Link */}
       <a
         href="https://github.com/kgrady13/faas.git"
         target="_blank"
         rel="noopener noreferrer"
-        className="text-muted-foreground hover:text-foreground transition-colors ml-auto md:ml-0"
+        className="text-muted-foreground hover:text-foreground transition-colors"
         aria-label="View on GitHub"
       >
-        <Github className="size-4 md:size-5" />
+        <Github className="size-5" />
       </a>
     </footer>
   );
