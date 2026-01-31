@@ -19,6 +19,7 @@ import { FooterActions } from "./footer-actions";
 import { DeploymentInspectSheet } from "./deployment-inspect-sheet";
 
 type InspectTab = "details" | "logs";
+type MobileView = "editor" | "output";
 
 export default function Playground() {
   // Core state from hooks
@@ -46,6 +47,7 @@ export default function Playground() {
     null
   );
   const [inspectTab, setInspectTab] = useState<InspectTab>("details");
+  const [mobileView, setMobileView] = useState<MobileView>("editor");
 
   // Combine loading states
   const loading = sessionLoading || execLoading;
@@ -246,10 +248,15 @@ export default function Playground() {
         onRestart={handleCreateSession}
       />
 
-      <main className="flex-1 flex min-h-0">
-        <CodeEditorPanel code={code} onChange={setCode} onFormat={handleFormatCode} />
+      <main className="flex-1 flex flex-col md:flex-row min-h-0">
+        <CodeEditorPanel
+          code={code}
+          onChange={setCode}
+          onFormat={handleFormatCode}
+          mobileView={mobileView}
+        />
 
-        <div className="w-1/2 flex flex-col min-h-0">
+        <div className={`w-full md:w-1/2 flex flex-col min-h-0 flex-1 md:flex-initial ${mobileView === "editor" ? "hidden md:flex" : "flex"}`}>
           <OutputPanel outputs={outputs} onClear={() => setOutputs([])} />
 
           <DeploymentsPanel
@@ -268,6 +275,8 @@ export default function Playground() {
         remainingTime={remainingTime}
         cronSchedule={cronSchedule}
         regions={regions}
+        mobileView={mobileView}
+        onMobileViewChange={setMobileView}
         onCronScheduleChange={setCronSchedule}
         onRegionsChange={setRegions}
         onNewSession={handleCreateSession}
