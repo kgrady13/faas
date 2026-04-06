@@ -15,7 +15,7 @@ export async function POST(request: NextRequest) {
   }
 
   const userId = getUserId(request);
-  const validation = validateActiveSession();
+  const validation = validateActiveSession(request);
   if (!validation.valid) {
     return validation.error;
   }

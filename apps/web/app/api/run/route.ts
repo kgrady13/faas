@@ -10,7 +10,7 @@ export async function POST(request: NextRequest) {
     return sseError("Code is required", 400);
   }
 
-  const validation = validateActiveSession();
+  const validation = validateActiveSession(request);
   if (!validation.valid) {
     return validation.error;
   }

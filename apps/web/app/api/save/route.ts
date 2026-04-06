@@ -11,7 +11,7 @@ export async function POST(request: NextRequest) {
     return jsonError("Code is required", 400);
   }
 
-  const validation = validateActiveSession();
+  const validation = validateActiveSession(request);
   if (!validation.valid) {
     return jsonError("No active session", 400);
   }

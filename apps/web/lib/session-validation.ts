@@ -1,5 +1,8 @@
-import { getSession } from "./session-store";
+import { NextRequest } from "next/server";
+import { getSession, setSession } from "./session-store";
 import { sseError } from "./api-response";
+import { getUserId } from "./deployments-store";
+import { generateSandboxName } from "./sandbox";
 import type { Session } from "./types";
 
 export interface SessionValidationSuccess {
@@ -16,12 +19,26 @@ export interface SessionValidationFailure {
 export type SessionValidationResult = SessionValidationSuccess | SessionValidationFailure;
 
 /**
- * Validates that there is a session with a sandbox name.
- * With persistent sandboxes, the SDK auto-resumes stopped VMs on command,
- * so we only need to verify a sandbox name exists.
+ * Validates that there is a sandbox to work with.
+ *
+ * With persistent sandboxes, the sandbox name is deterministic from the user ID.
+ * If the in-memory session was lost (dev hot-reload), we recover it from the request.
  */
-export function validateActiveSession(): SessionValidationResult {
-  const session = getSession();
+export function validateActiveSession(request?: NextRequest): SessionValidationResult {
+  let session = getSession();
+
+  // If session was lost from globalThis (hot-reload, restart), recover from request
+  if ((!session || !session.sandboxName) && request) {
+    const userId = getUserId(request);
+    const sandboxName = generateSandboxName(userId);
+    session = {
+      sandboxName,
+      status: "running",
+      timeout: Date.now() + 30 * 60 * 1000,
+      createdAt: new Date(),
+    };
+    setSession(session);
+  }
 
   if (!session || !session.sandboxName) {
     return {

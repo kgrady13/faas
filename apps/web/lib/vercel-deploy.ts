@@ -7,7 +7,7 @@ import type { UserProject, UsageSummary, UsageCharge } from "./types";
 interface VercelFile {
   file: string;
   data: string;
-  encoding?: 'base64' | 'utf-8';
+  encoding?: "base64" | "utf-8";
 }
 
 interface CreateDeploymentOptions {
@@ -20,7 +20,7 @@ interface CreateDeploymentOptions {
 interface DeploymentResponse {
   id: string;
   url: string;
-  readyState: 'QUEUED' | 'BUILDING' | 'READY' | 'ERROR' | 'CANCELED';
+  readyState: "QUEUED" | "BUILDING" | "READY" | "ERROR" | "CANCELED";
   regions?: string[];
   errorMessage?: string;
 }
@@ -32,7 +32,7 @@ function getEnvConfig() {
   const fallbackProjectId = process.env.VERCEL_WORKER_PROJECT_ID;
 
   if (!token) {
-    throw new Error('VERCEL_API_TOKEN environment variable is required');
+    throw new Error("VERCEL_API_TOKEN environment variable is required");
   }
 
   return { token, teamId, fallbackProjectId };
@@ -51,7 +51,7 @@ export function getVercelClient(): Vercel {
  * SHA-256 hash avoids leaking the raw IP into Vercel project names.
  */
 export function generateProjectName(userId: string): string {
-  const hash = createHash('sha256').update(userId).digest('hex').slice(0, 12);
+  const hash = createHash("sha256").update(userId).digest("hex").slice(0, 12);
   return `faas-${hash}`;
 }
 
@@ -85,7 +85,8 @@ export async function ensureUserProject(userId: string): Promise<UserProject> {
     // Handle 409 conflict — project exists in Vercel but not in Redis
     const is409 =
       error instanceof Error &&
-      (error.message.includes('409') || error.message.includes('already exists'));
+      (error.message.includes("409") ||
+        error.message.includes("already exists"));
 
     if (is409) {
       const result = await vercel.projects.getProjects({
@@ -93,9 +94,9 @@ export async function ensureUserProject(userId: string): Promise<UserProject> {
         search: projectName,
       });
 
-      const projects = 'projects' in result ? result.projects : result;
+      const projects = "projects" in result ? result.projects : result;
       const found = projects?.find(
-        (p: { name: string }) => p.name === projectName
+        (p: { name: string }) => p.name === projectName,
       );
 
       if (found) {
@@ -120,7 +121,7 @@ export async function ensureUserProject(userId: string): Promise<UserProject> {
 export function generateBuildOutput(
   bundledCode: string,
   functionName: string,
-  cronSchedule?: string
+  cronSchedule?: string,
 ): VercelFile[] {
   const files: VercelFile[] = [];
 
@@ -139,15 +140,15 @@ export function generateBuildOutput(
   }
 
   files.push({
-    file: '.vercel/output/config.json',
+    file: ".vercel/output/config.json",
     data: JSON.stringify(config, null, 2),
   });
 
   // .vc-config.json - function configuration for Bun runtime
   // Bun supports Web Standard Request/Response natively - no wrapper needed
   const vcConfig = {
-    runtime: 'bun1.x',
-    handler: 'index.js',
+    runtime: "bun1.x",
+    handler: "index.js",
     supportsResponseStreaming: true,
   };
 
@@ -170,7 +171,7 @@ export function generateBuildOutput(
  * SDK handles file uploads automatically — no manual SHA1 hashing needed
  */
 export async function createDeployment(
-  options: CreateDeploymentOptions & { projectId: string }
+  options: CreateDeploymentOptions & { projectId: string },
 ): Promise<DeploymentResponse> {
   const { teamId } = getEnvConfig();
   const vercel = getVercelClient();
@@ -180,7 +181,7 @@ export async function createDeployment(
     name: projectId,
     project: projectId,
     files: files.map((f) => ({ file: f.file, data: f.data })),
-    target: 'production',
+    target: "production",
     meta: {
       functionName,
       deployedAt: new Date().toISOString(),
@@ -199,16 +200,20 @@ export async function createDeployment(
 
   return {
     id: deployment.id,
-    url: deployment.url ? `https://${deployment.url}` : '',
-    readyState: deployment.readyState as DeploymentResponse['readyState'],
-    errorMessage: (deployment as Record<string, unknown>).errorMessage as string | undefined,
+    url: deployment.url ? `https://${deployment.url}` : "",
+    readyState: deployment.readyState as DeploymentResponse["readyState"],
+    errorMessage: (deployment as Record<string, unknown>).errorMessage as
+      | string
+      | undefined,
   };
 }
 
 /**
  * Get the status of a deployment
  */
-export async function getDeploymentStatus(deploymentId: string): Promise<DeploymentResponse> {
+export async function getDeploymentStatus(
+  deploymentId: string,
+): Promise<DeploymentResponse> {
   const { teamId } = getEnvConfig();
   const vercel = getVercelClient();
 
@@ -219,16 +224,20 @@ export async function getDeploymentStatus(deploymentId: string): Promise<Deploym
 
   return {
     id: deployment.id,
-    url: deployment.url ? `https://${deployment.url}` : '',
-    readyState: deployment.readyState as DeploymentResponse['readyState'],
-    errorMessage: (deployment as Record<string, unknown>).errorMessage as string | undefined,
+    url: deployment.url ? `https://${deployment.url}` : "",
+    readyState: deployment.readyState as DeploymentResponse["readyState"],
+    errorMessage: (deployment as Record<string, unknown>).errorMessage as
+      | string
+      | undefined,
   };
 }
 
 /**
  * Delete a deployment from Vercel
  */
-export async function deleteVercelDeployment(deploymentId: string): Promise<void> {
+export async function deleteVercelDeployment(
+  deploymentId: string,
+): Promise<void> {
   const { teamId } = getEnvConfig();
   const vercel = getVercelClient();
 
@@ -242,23 +251,25 @@ export async function deleteVercelDeployment(deploymentId: string): Promise<void
  * Build log event types from the deployment event stream
  */
 export type BuildLogEvent =
-  | { type: 'stdout' | 'stderr' | 'command'; text: string }
-  | { type: 'state'; readyState: string }
-  | { type: 'done'; readyState: string }
-  | { type: 'error'; message: string };
+  | { type: "stdout" | "stderr" | "command"; text: string }
+  | { type: "state"; readyState: string }
+  | { type: "done"; readyState: string }
+  | { type: "error"; message: string };
 
-const TERMINAL_STATES = ['READY', 'ERROR', 'CANCELED'];
-const LOG_TYPES = ['stdout', 'stderr', 'command'];
+const TERMINAL_STATES = ["READY", "ERROR", "CANCELED"];
+const LOG_TYPES = ["stdout", "stderr", "command"];
 
 /**
  * Stream build logs for a deployment using the SDK's getDeploymentEvents
  * Uses serial-based deduplication (adapted from reference project)
  */
-export async function* streamBuildLogs(deploymentId: string): AsyncGenerator<BuildLogEvent> {
+export async function* streamBuildLogs(
+  deploymentId: string,
+): AsyncGenerator<BuildLogEvent> {
   const { teamId } = getEnvConfig();
   const vercel = getVercelClient();
 
-  let lastSerial = '';
+  let lastSerial = "";
 
   while (true) {
     try {
@@ -270,7 +281,7 @@ export async function* streamBuildLogs(deploymentId: string): AsyncGenerator<Bui
       const events = (await vercel.deployments.getDeploymentEvents({
         idOrUrl: deploymentId,
         teamId: teamId || undefined,
-        direction: 'forward',
+        direction: "forward",
         limit: -1,
         builds: 1,
       })) as Array<{
@@ -293,26 +304,26 @@ export async function* streamBuildLogs(deploymentId: string): AsyncGenerator<Bui
         const text = event.text ?? event.payload?.text;
         if (text && LOG_TYPES.includes(event.type)) {
           yield {
-            type: event.type as 'stdout' | 'stderr' | 'command',
+            type: event.type as "stdout" | "stderr" | "command",
             text,
           };
         }
 
         const state = event.info?.readyState ?? event.payload?.info?.readyState;
-        if (event.type === 'deployment-state' && state) {
-          yield { type: 'state', readyState: state };
+        if (event.type === "deployment-state" && state) {
+          yield { type: "state", readyState: state };
         }
       }
 
       if (TERMINAL_STATES.includes(readyState as string)) {
-        yield { type: 'done', readyState: String(readyState) };
+        yield { type: "done", readyState: String(readyState) };
         return;
       }
 
       await new Promise((resolve) => setTimeout(resolve, 1000));
     } catch (err) {
       yield {
-        type: 'error',
+        type: "error",
         message: err instanceof Error ? err.message : String(err),
       };
       return;
@@ -326,21 +337,21 @@ export async function* streamBuildLogs(deploymentId: string): AsyncGenerator<Bui
  */
 export async function streamDeploymentLogs(
   deploymentId: string,
-  projectId: string
+  projectId: string,
 ): Promise<ReadableStream<Uint8Array>> {
   const { token, teamId } = getEnvConfig();
 
   const params = new URLSearchParams();
-  if (teamId) params.set('teamId', teamId);
+  if (teamId) params.set("teamId", teamId);
 
   const response = await fetch(
     `https://api.vercel.com/v1/projects/${projectId}/deployments/${deploymentId}/runtime-logs?${params}`,
     {
       headers: {
         Authorization: `Bearer ${token}`,
-        Accept: 'application/stream+json',
+        Accept: "application/stream+json",
       },
-    }
+    },
   );
 
   if (!response.ok) {
@@ -349,7 +360,7 @@ export async function streamDeploymentLogs(
   }
 
   if (!response.body) {
-    throw new Error('No response body for log stream');
+    throw new Error("No response body for log stream");
   }
 
   return response.body;
@@ -362,7 +373,7 @@ export async function streamDeploymentLogs(
 export async function getUserUsage(
   projectId: string,
   from: string,
-  to: string
+  to: string,
 ): Promise<UsageSummary> {
   const { teamId } = getEnvConfig();
   const vercel = getVercelClient();
@@ -403,6 +414,6 @@ export async function getUserUsage(
     periodStart: from,
     periodEnd: to,
     projectId,
-    projectName: '',
+    projectName: "",
   };
 }
