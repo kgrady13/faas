@@ -8,16 +8,20 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
-import { Clock, Copy, MoreVertical } from "lucide-react";
+import { Clock, Copy, MoreVertical, RefreshCw } from "lucide-react";
 import type { DeploymentState } from "@/hooks";
+import type { UsageSummary } from "@/lib/types";
 import { Shimmer } from "@/components/ai-elements/shimmer";
+import { usePlaygroundStore } from "@/lib/store/playground-store";
 
 interface DeploymentsPanelProps {
   deployments: DeploymentState[];
   onRefresh: () => void;
   onCopyUrl: (url: string) => void;
-  onInspect: (deployment: DeploymentState) => void;
   onDelete: (id: string) => void;
+  usage: UsageSummary | null;
+  usageLoading: boolean;
+  onRefreshUsage: () => void;
 }
 
 function getDeploymentStatusBadge(status: DeploymentState["status"]) {
@@ -39,15 +43,88 @@ function getDeploymentStatusBadge(status: DeploymentState["status"]) {
   );
 }
 
+function UsageSummarySection({
+  usage,
+  loading,
+  onRefresh,
+}: {
+  usage: UsageSummary | null;
+  loading: boolean;
+  onRefresh: () => void;
+}) {
+  if (loading) {
+    return (
+      <div className="px-3 py-2 border-b border-border">
+        <Shimmer>Loading usage...</Shimmer>
+      </div>
+    );
+  }
+
+  if (!usage) return null;
+
+  // Aggregate charges by service name
+  const byService = new Map<string, number>();
+  for (const charge of usage.charges) {
+    byService.set(
+      charge.serviceName,
+      (byService.get(charge.serviceName) || 0) + charge.billedCost
+    );
+  }
+  const topServices = [...byService.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3);
+
+  return (
+    <div className="px-3 py-2 border-b border-border space-y-1">
+      <div className="flex items-center justify-between">
+        <span className="text-xs text-muted-foreground uppercase tracking-wide">
+          Usage (This Month)
+        </span>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-6"
+          onClick={onRefresh}
+        >
+          <RefreshCw className="size-3" />
+        </Button>
+      </div>
+      <div className="flex items-center justify-between">
+        <span className="text-xs text-muted-foreground">Total Cost</span>
+        <span className="text-sm font-mono font-medium">
+          ${usage.totalBilledCost.toFixed(4)}
+        </span>
+      </div>
+      {topServices.map(([name, cost]) => (
+        <div key={name} className="flex items-center justify-between">
+          <span className="text-xs text-muted-foreground truncate max-w-[60%]">
+            {name}
+          </span>
+          <span className="text-xs font-mono">${cost.toFixed(4)}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function DeploymentsPanel({
   deployments,
   onRefresh,
   onCopyUrl,
-  onInspect,
   onDelete,
+  usage,
+  usageLoading,
+  onRefreshUsage,
 }: DeploymentsPanelProps) {
+  const setInspectedDeployment = usePlaygroundStore((s) => s.setInspectedDeployment);
+
   return (
     <div className="h-32 md:h-48 shrink-0 flex flex-col">
+      <UsageSummarySection
+        usage={usage}
+        loading={usageLoading}
+        onRefresh={onRefreshUsage}
+      />
       <div className="shrink-0 px-3 py-2 border-b border-border text-sm text-muted-foreground flex items-center justify-between">
         <span>Deployed Functions ({deployments.length})</span>
         <Button variant="ghost" size="xs" onClick={onRefresh}>
@@ -122,7 +199,7 @@ export function DeploymentsPanel({
                   <Button
                     variant="ghost"
                     size="xs"
-                    onClick={() => onInspect(deployment)}
+                    onClick={() => setInspectedDeployment(deployment)}
                   >
                     Inspect
                   </Button>

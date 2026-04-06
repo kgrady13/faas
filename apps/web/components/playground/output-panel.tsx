@@ -3,16 +3,13 @@
 import { useEffect, useRef } from "react";
 import Ansi from "ansi-to-react";
 import { Button } from "@/components/ui/button";
-import type { Output } from "@/lib/types";
 import { RotatingText } from "@/components/shadcnio/rotating-text";
+import { usePlaygroundStore } from "@/lib/store/playground-store";
 
-interface OutputPanelProps {
-  outputs: Output[];
-  onClear: () => void;
-}
-
-export function OutputPanel({ outputs, onClear }: OutputPanelProps) {
+export function OutputPanel() {
   const outputRef = useRef<HTMLDivElement>(null);
+  const outputs = usePlaygroundStore((s) => s.outputs);
+  const clearOutputs = usePlaygroundStore((s) => s.clearOutputs);
 
   // Auto-scroll to bottom when new output arrives
   useEffect(() => {
@@ -25,7 +22,7 @@ export function OutputPanel({ outputs, onClear }: OutputPanelProps) {
     <div className="flex-1 flex flex-col min-h-0 border-b border-border">
       <div className="shrink-0 px-3 py-2 border-b border-border text-sm text-muted-foreground flex items-center justify-between">
         <span>Output</span>
-        <Button variant="ghost" size="xs" onClick={onClear}>
+        <Button variant="ghost" size="xs" onClick={clearOutputs}>
           Clear
         </Button>
       </div>

@@ -1,15 +1,15 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import {
   useSession,
   useCodeExecution,
   useDeployments,
   useKeyboardShortcuts,
-  type DeploymentState,
+  useUsage,
 } from "@/hooks";
 import { DEFAULT_CODE } from "@/lib/constants";
-import type { Output } from "@/lib/types";
+import { usePlaygroundStore } from "@/lib/store/playground-store";
 
 import { PlaygroundHeader } from "./header";
 import { CodeEditorPanel } from "./code-editor-panel";
@@ -18,11 +18,7 @@ import { DeploymentsPanel } from "./deployments-panel";
 import { FooterActions } from "./footer-actions";
 import { DeploymentInspectSheet } from "./deployment-inspect-sheet";
 
-type InspectTab = "details" | "logs";
-type MobileView = "editor" | "output";
-
 export default function Playground() {
-  // Core state from hooks
   const {
     session,
     remainingTime,
@@ -37,38 +33,46 @@ export default function Playground() {
 
   const { loading: execLoading, runCode, deployCode } = useCodeExecution();
   const { deployments, fetchDeployments, deleteDeployment } = useDeployments();
+  const { usage, loading: usageLoading, fetchUsage } = useUsage();
 
-  // Local UI state
-  const [code, setCode] = useState(DEFAULT_CODE);
-  const [outputs, setOutputs] = useState<Output[]>([]);
-  const [cronSchedule, setCronSchedule] = useState("* * * * *");
-  const [regions, setRegions] = useState<string[]>(["iad1"]);
-  const [inspectedDeployment, setInspectedDeployment] = useState<DeploymentState | null>(
-    null
-  );
-  const [inspectTab, setInspectTab] = useState<InspectTab>("details");
-  const [mobileView, setMobileView] = useState<MobileView>("editor");
+  // Store
+  const code = usePlaygroundStore((s) => s.code);
+  const setCode = usePlaygroundStore((s) => s.setCode);
+  const addOutput = usePlaygroundStore((s) => s.addOutput);
+  const clearOutputs = usePlaygroundStore((s) => s.clearOutputs);
+  const cronSchedule = usePlaygroundStore((s) => s.cronSchedule);
+  const regions = usePlaygroundStore((s) => s.regions);
+  const mobileView = usePlaygroundStore((s) => s.mobileView);
+  const inspectedDeployment = usePlaygroundStore((s) => s.inspectedDeployment);
+  const inspectTab = usePlaygroundStore((s) => s.inspectTab);
+  const setInspectedDeployment = usePlaygroundStore((s) => s.setInspectedDeployment);
+  const setInspectTab = usePlaygroundStore((s) => s.setInspectTab);
+
+  // Initialize default code once
+  const initialized = useRef(false);
+  useEffect(() => {
+    if (!initialized.current) {
+      initialized.current = true;
+      setCode(DEFAULT_CODE);
+      fetchUsage();
+    }
+  }, [setCode, fetchUsage]);
 
   // Combine loading states
   const loading = sessionLoading || execLoading;
 
-  // Output helper
-  const addOutput = useCallback((type: Output["type"], content: string) => {
-    setOutputs((prev) => [...prev, { type, content, timestamp: new Date() }]);
-  }, []);
-
   // Action handlers
   const handleCreateSession = useCallback(async () => {
-    setOutputs([]);
+    clearOutputs();
     addOutput("system", "Creating new sandbox...");
 
     const result = await createSession();
     if (result.success) {
-      addOutput("system", `Sandbox created`);
+      addOutput("system", "Sandbox created");
     } else {
       addOutput("stderr", `Error: ${result.error}`);
     }
-  }, [createSession, addOutput]);
+  }, [createSession, addOutput, clearOutputs]);
 
   const handleRunCode = useCallback(async () => {
     if (!session || session.status !== "running") {
@@ -123,16 +127,7 @@ export default function Playground() {
         },
       }
     );
-  }, [
-    session,
-    code,
-    cronSchedule,
-    regions,
-    deployCode,
-    addOutput,
-    fetchDeployments,
-    setSession,
-  ]);
+  }, [session, code, cronSchedule, regions, deployCode, addOutput, fetchDeployments, setSession]);
 
   const handlePause = useCallback(async () => {
     addOutput("system", "Creating snapshot...");
@@ -146,7 +141,7 @@ export default function Playground() {
   }, [saveSnapshot, addOutput]);
 
   const handleResume = useCallback(async () => {
-    addOutput("system", `Restoring from snapshot...`);
+    addOutput("system", "Restoring from snapshot...");
     const result = await restoreSnapshot();
     if (result.success) {
       addOutput("system", "Sandbox restored successfully!");
@@ -191,7 +186,6 @@ export default function Playground() {
 
   const handleFormatCode = useCallback(async () => {
     try {
-      // Lazy load Prettier (~500KB) only when formatting is requested
       const [prettier, prettierPluginTypescript, prettierPluginEstree] =
         await Promise.all([
           import("prettier/standalone"),
@@ -211,7 +205,7 @@ export default function Playground() {
     } catch {
       addOutput("stderr", "Failed to format code - check for syntax errors");
     }
-  }, [code, addOutput]);
+  }, [code, addOutput, setCode]);
 
   // Keyboard shortcuts
   useKeyboardShortcuts(
@@ -226,16 +220,6 @@ export default function Playground() {
     }
   );
 
-  // Inspection sheet handlers
-  const handleInspect = (deployment: DeploymentState) => {
-    setInspectedDeployment(deployment);
-    setInspectTab("details");
-  };
-
-  const handleCloseInspect = () => {
-    setInspectedDeployment(null);
-  };
-
   return (
     <div className="h-screen flex flex-col overflow-hidden bg-background text-foreground">
       <PlaygroundHeader
@@ -249,22 +233,19 @@ export default function Playground() {
       />
 
       <main className="flex-1 flex flex-col md:flex-row min-h-0">
-        <CodeEditorPanel
-          code={code}
-          onChange={setCode}
-          onFormat={handleFormatCode}
-          mobileView={mobileView}
-        />
+        <CodeEditorPanel onFormat={handleFormatCode} />
 
         <div className={`w-full md:w-1/2 flex flex-col min-h-0 flex-1 md:flex-initial ${mobileView === "editor" ? "hidden md:flex" : "flex"}`}>
-          <OutputPanel outputs={outputs} onClear={() => setOutputs([])} />
+          <OutputPanel />
 
           <DeploymentsPanel
             deployments={deployments}
             onRefresh={fetchDeployments}
             onCopyUrl={handleCopyUrl}
-            onInspect={handleInspect}
             onDelete={handleDeleteDeployment}
+            usage={usage}
+            usageLoading={usageLoading}
+            onRefreshUsage={() => fetchUsage()}
           />
         </div>
       </main>
@@ -273,12 +254,6 @@ export default function Playground() {
         loading={loading}
         sessionRunning={session?.status === "running"}
         remainingTime={remainingTime}
-        cronSchedule={cronSchedule}
-        regions={regions}
-        mobileView={mobileView}
-        onMobileViewChange={setMobileView}
-        onCronScheduleChange={setCronSchedule}
-        onRegionsChange={setRegions}
         onNewSession={handleCreateSession}
         onRun={handleRunCode}
         onDeploy={handleDeployCode}
@@ -288,7 +263,7 @@ export default function Playground() {
         deployment={inspectedDeployment}
         activeTab={inspectTab}
         onTabChange={setInspectTab}
-        onClose={handleCloseInspect}
+        onClose={() => setInspectedDeployment(null)}
         onCopyUrl={handleCopyUrl}
       />
     </div>

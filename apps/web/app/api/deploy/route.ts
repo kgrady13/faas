@@ -1,8 +1,8 @@
 import { NextRequest } from "next/server";
 import { updateSession } from "@/lib/session-store";
 import { buildCode, createSnapshot } from "@/lib/sandbox";
-import { generateBuildOutput, createDeployment, getDeploymentStatus } from "@/lib/vercel-deploy";
-import { addDeployment, updateDeployment, getUserId, type Deployment } from "@/lib/deployments-store";
+import { generateBuildOutput, createDeployment, ensureUserProject } from "@/lib/vercel-deploy";
+import { addDeployment, getUserId, type Deployment } from "@/lib/deployments-store";
 import { sseError, sseResponse } from "@/lib/api-response";
 import { validateActiveSession } from "@/lib/session-validation";
 
@@ -33,6 +33,19 @@ export async function POST(request: NextRequest) {
       };
 
       try {
+        // Phase 0: Ensure per-user Vercel project exists
+        emit("phase", "setup");
+        emit("log", "Ensuring deployment project exists...");
+
+        let userProject;
+        try {
+          userProject = await ensureUserProject(userId);
+          emit("log", `Project ready: ${userProject.projectName}`);
+        } catch (err) {
+          emit("error", `Failed to create deployment project: ${err instanceof Error ? err.message : String(err)}`);
+          return;
+        }
+
         // Phase 1: Build
         emit("phase", "build");
 
@@ -71,16 +84,16 @@ export async function POST(request: NextRequest) {
         // Generate Build Output API files
         const files = generateBuildOutput(bundledCode, functionName, cronSchedule);
 
-        // Create deployment on Vercel
+        // Create deployment on Vercel (SDK handles file uploads)
         const deploymentResult = await createDeployment({
           files,
           functionName,
           cronSchedule,
           regions,
+          projectId: userProject.vercelProjectId,
         });
 
         // Store deployment in our local store
-        // Use user-selected regions, or fetch from API response once deployment is ready
         const deployment: Deployment = {
           id: deploymentResult.id,
           url: deploymentResult.url,
@@ -92,14 +105,10 @@ export async function POST(request: NextRequest) {
           cronSchedule,
           regions: regions || deploymentResult.regions,
           errorMessage: deploymentResult.errorMessage,
+          vercelProjectId: userProject.vercelProjectId,
         };
 
         await addDeployment(userId, deployment);
-
-        // If deployment is not ready yet, poll for status
-        if (deployment.status === "building" || deployment.status === "queued") {
-          pollDeploymentStatus(userId, deployment.id);
-        }
 
         emit("log", `Deployment started: ${deployment.id}`);
         emit("deploy_done", {
@@ -139,44 +148,4 @@ export async function POST(request: NextRequest) {
   });
 
   return sseResponse(stream);
-}
-
-/**
- * Poll deployment status until it's ready or fails
- */
-async function pollDeploymentStatus(userId: string, deploymentId: string) {
-  const maxAttempts = 60; // 5 minutes max
-  let attempts = 0;
-
-  while (attempts < maxAttempts) {
-    await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds
-    attempts++;
-
-    try {
-      const status = await getDeploymentStatus(deploymentId);
-
-      const newStatus = status.readyState === 'READY' ? 'ready' :
-                        status.readyState === 'ERROR' ? 'error' :
-                        status.readyState === 'CANCELED' ? 'canceled' :
-                        status.readyState === 'QUEUED' ? 'queued' : 'building';
-
-      const updates: Partial<Deployment> = {
-        status: newStatus,
-        url: status.url,
-        errorMessage: status.errorMessage,
-      };
-      // Only update regions if API returns them
-      if (status.regions && status.regions.length > 0) {
-        updates.regions = status.regions;
-      }
-      await updateDeployment(userId, deploymentId, updates);
-
-      // Stop polling if deployment is done
-      if (newStatus === 'ready' || newStatus === 'error' || newStatus === 'canceled') {
-        break;
-      }
-    } catch {
-      // Ignore polling errors, continue trying
-    }
-  }
 }

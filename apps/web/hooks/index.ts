@@ -12,3 +12,6 @@ export type { KeyboardShortcutActions, UseKeyboardShortcutsOptions } from "./use
 
 export { useRuntimeLogs } from "./use-runtime-logs";
 export type { UseRuntimeLogsReturn } from "./use-runtime-logs";
+
+export { useUsage } from "./use-usage";
+export type { UseUsageReturn } from "./use-usage";

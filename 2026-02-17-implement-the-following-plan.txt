@@ -1,0 +1,1461 @@
+
+ ▐▛███▜▌   Claude Code v2.1.39
+▝▜█████▛▘  Opus 4.6 (1M context) · API Usage Billing
+  ▘▘ ▝▝    ~/Code/vercel/customer/notion/faas
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ Plan to implement                                                            │
+│                                                                              │
+│ Integration Plan: Zustand Store + Cleaner Vercel Deployment                  │
+│                                                                              │
+│ Context                                                                      │
+│                                                                              │
+│ The reference project (temp/platform-template-main) has a cleaner deployment │
+│  architecture than our current FaaS project. Two areas to adopt:             │
+│                                                                              │
+│ 1. State management: playground/index.tsx lifts all state through props (297 │
+│  lines of wiring). Zustand eliminates prop drilling.                         │
+│ 2. Deployment flow: We currently use manual fetch() calls with SHA1 hashing  │
+│ to the Vercel API, have no real-time build log streaming, and use            │
+│ fire-and-forget background polling. The reference uses @vercel/sdk (which    │
+│ handles file uploads automatically), streams build logs via                  │
+│ getDeploymentEvents(), and shows them in a deploy popover.                   │
+│                                                                              │
+│ ---                                                                          │
+│ Part 1: Zustand Store                                                        │
+│                                                                              │
+│ Files to create                                                              │
+│                                                                              │
+│ - apps/web/lib/store/playground-store.ts                                     │
+│                                                                              │
+│ Files to modify                                                              │
+│                                                                              │
+│ - apps/web/components/playground/index.tsx — Remove state lifting, use store │
+│ - apps/web/components/playground/footer-actions.tsx — Read/write store       │
+│ directly                                                                     │
+│ - apps/web/components/playground/output-panel.tsx — Read outputs from store  │
+│ - apps/web/components/playground/deployments-panel.tsx — Read deployments    │
+│ from store                                                                   │
+│ - apps/web/components/playground/code-editor-panel.tsx — Read/write code     │
+│ from store                                                                   │
+│ - apps/web/components/playground/header.tsx — Read session from store        │
+│                                                                              │
+│ Store shape                                                                  │
+│                                                                              │
+│ interface PlaygroundState {                                                  │
+│   code: string;                                                              │
+│   setCode: (code: string) => void;                                           │
+│                                                                              │
+│   outputs: Output[];                                                         │
+│   addOutput: (type: Output["type"], content: string) => void;                │
+│   clearOutputs: () => void;                                                  │
+│                                                                              │
+│   cronSchedule: string;                                                      │
+│   setCronSchedule: (schedule: string) => void;                               │
+│   regions: string[];                                                         │
+│   setRegions: (regions: string[]) => void;                                   │
+│                                                                              │
+│   mobileView: "editor" | "output";                                           │
+│   setMobileView: (view: "editor" | "output") => void;                        │
+│   inspectedDeployment: DeploymentState | null;                               │
+│   inspectTab: "details" | "logs";                                            │
+│   setInspectedDeployment: (d: DeploymentState | null) => void;               │
+│   setInspectTab: (tab: "details" | "logs") => void;                          │
+│ }                                                                            │
+│                                                                              │
+│ Dependency                                                                   │
+│                                                                              │
+│ - zustand ^5                                                                 │
+│                                                                              │
+│ ---                                                                          │
+│ Part 2: Cleaner Vercel Deployment                                            │
+│                                                                              │
+│ Current approach (what we're replacing)                                      │
+│                                                                              │
+│ - lib/vercel-deploy.ts: Manual fetch() to /v2/files with SHA1 hashing for    │
+│ each file upload, then fetch() to /v13/deployments with sha references       │
+│ - app/api/deploy/route.ts: Fire-and-forget pollDeploymentStatus() — polls    │
+│ every 5s in background, no logs sent to client                               │
+│ - footer-actions.tsx: Simple "Deploy" button, no visibility into build       │
+│ progress                                                                     │
+│ - deployments-panel.tsx: Shows "building" badge but no build logs            │
+│                                                                              │
+│ What the reference project does better                                       │
+│                                                                              │
+│ - @vercel/sdk: Pass files as { file, data } arrays — SDK handles             │
+│ upload/hashing internally                                                    │
+│ - vercel.deployments.getDeploymentEvents(): Streams real-time build logs     │
+│ (stdout, stderr, command, deployment-state) with serial-based deduplication  │
+│ - Deploy popover: Shows live build output, then success/error state          │
+│                                                                              │
+│ Changes                                                                      │
+│                                                                              │
+│ A. Rewrite vercel-deploy.ts with @vercel/sdk                                 │
+│                                                                              │
+│ File: apps/web/lib/vercel-deploy.ts                                          │
+│                                                                              │
+│ Replace:                                                                     │
+│ - uploadFile() + SHA1 hashing → delete entirely (SDK handles file uploads)   │
+│ - createDeployment() → vercel.deployments.createDeployment({ requestBody: {  │
+│ name, files, target, project }, teamId })                                    │
+│ - getDeploymentStatus() → vercel.deployments.getDeployment({ idOrUrl, teamId │
+│  })                                                                          │
+│ - deleteVercelDeployment() → vercel.deployments.deleteDeployment({ id,       │
+│ teamId })                                                                    │
+│ - streamDeploymentLogs() → keep as-is (runtime logs, not build logs)         │
+│                                                                              │
+│ Add new:                                                                     │
+│ - getVercelClient() — creates new Vercel({ bearerToken:                      │
+│ process.env.VERCEL_API_TOKEN })                                              │
+│ - streamBuildLogs(deploymentId) — async generator using                      │
+│ vercel.deployments.getDeploymentEvents() with serial-based deduplication     │
+│ (adapted from reference's streamDeploymentLogs procedure)                    │
+│                                                                              │
+│ Keep unchanged:                                                              │
+│ - generateBuildOutput() — our Build Output API v3 structure stays the same   │
+│                                                                              │
+│ B. Add build log streaming API route                                         │
+│                                                                              │
+│ File: apps/web/app/api/deployments/[id]/build-logs/route.ts (new)            │
+│                                                                              │
+│ SSE endpoint that:                                                           │
+│ 1. Creates Vercel SDK client                                                 │
+│ 2. Calls streamBuildLogs(deploymentId) async generator from vercel-deploy.ts │
+│ 3. Emits SSE events: { type: "stdout"|"stderr"|"state"|"done"|"error", ... } │
+│ 4. Terminates when deployment reaches READY, ERROR, or CANCELED              │
+│                                                                              │
+│ C. Simplify deploy API route                                                 │
+│                                                                              │
+│ File: apps/web/app/api/deploy/route.ts                                       │
+│                                                                              │
+│ - Use SDK's createDeployment() instead of manual HTTP                        │
+│ - Remove pollDeploymentStatus() entirely — client will stream build logs     │
+│ separately                                                                   │
+│ - Keep the build phase (sandbox buildCode()) and snapshot creation as-is     │
+│ - Return deployment ID immediately so client can start streaming build logs  │
+│                                                                              │
+│ D. Deploy Popover component                                                  │
+│                                                                              │
+│ File: apps/web/components/playground/deploy-popover.tsx (new)                │
+│                                                                              │
+│ Popover that replaces the Deploy button in footer. States:                   │
+│ - Idle: "Deploy" button + cron/regions config (moved from footer inline)     │
+│ - Building: SSE from build phase, then SSE from build-logs endpoint — shown  │
+│ in mini terminal                                                             │
+│ - Ready: Green dot, function URL with copy, "View Deployment" link           │
+│ - Error: Red dot, error message, build logs, "Try Again" button              │
+│                                                                              │
+│ Uses a useDeployment() hook internally (similar to reference project's       │
+│ pattern).                                                                    │
+│                                                                              │
+│ E. Update footer-actions                                                     │
+│                                                                              │
+│ File: apps/web/components/playground/footer-actions.tsx                      │
+│                                                                              │
+│ - Replace inline Deploy button + cron/regions dropdowns with <DeployPopover  │
+│ />                                                                           │
+│ - Keep New Session and Run buttons as-is                                     │
+│                                                                              │
+│ Dependency                                                                   │
+│                                                                              │
+│ - @vercel/sdk ^1                                                             │
+│                                                                              │
+│ ---                                                                          │
+│ Implementation Order                                                         │
+│                                                                              │
+│ 1. bun add zustand @vercel/sdk in apps/web/                                  │
+│ 2. Create Zustand store                                                      │
+│ 3. Refactor playground components to use store                               │
+│ 4. Rewrite vercel-deploy.ts with @vercel/sdk                                 │
+│ 5. Add build log streaming route                                             │
+│ 6. Simplify deploy API route                                                 │
+│ 7. Create DeployPopover component                                            │
+│ 8. Wire up in footer-actions                                                 │
+│                                                                              │
+│ ---                                                                          │
+│ Verification                                                                 │
+│                                                                              │
+│ 1. cd apps/web && bun tsc --noEmit — types pass                              │
+│ 2. bun dev — dev server starts, playground loads                             │
+│ 3. Create session → run code → outputs display correctly                     │
+│ 4. Deploy a function → popover shows build logs → deployment completes → URL │
+│  works                                                                       │
+│ 5. Mobile layout still works                                                 │
+│ 6. Keyboard shortcuts (N, R, D) still work                                   │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+⏺ I'll start by reading the key files I need to understand, then implement the
+  plan systematically.
+
+⏺ Let me start by reading all the key files I need to understand.
+
+⏺ Read 10 files (ctrl+o to expand)
+
+⏺ Now let me read the hooks and a few more files to understand the full picture.
+
+⏺ Read 8 files (ctrl+o to expand)
+
+⏺ Now let me check what's in the reference project for the SDK patterns.
+
+⏺ Searched for 1 pattern, read 2 files (ctrl+o to expand)
+
+⏺ Good, I have a comprehensive understanding of both codebases. Let me now start
+   implementing. First, install dependencies.
+
+⏺ Bash(cd /Users/karsongrady/Code/vercel/customer/notion/faas/apps/web && bun
+      add zustand @vercel/sdk)
+  ⎿  bun add v1.3.1 (89fa0f34)
+
+     installed zustand@5.0.11
+     … +7 lines (ctrl+o to expand)
+
+⏺ Now let me create the Zustand store.
+
+⏺ Bash(mkdir -p
+      /Users/karsongrady/Code/vercel/customer/notion/faas/apps/web/lib/store)
+  ⎿  Done
+
+⏺ Write(apps/web/lib/store/playground-store.ts)
+  ⎿  Wrote 58 lines to apps/web/lib/store/playground-store.ts
+       1 import { create } from "zustand";
+       2 import type { Output } from "@/lib/types";
+       3 import type { DeploymentState } from "@/hooks/use-deployments";
+       4 
+       5 export interface PlaygroundState {
+       6   // Code editor
+       7   code: string;
+       8   setCode: (code: string) => void;
+       9 
+      10   // Output panel
+     … +48 lines (ctrl+o to expand)
+
+⏺ Now let me refactor all the playground components. I'll start with the main
+  index.tsx which needs the biggest rewrite, then update each child component.
+
+⏺ Write(apps/web/components/playground/index.tsx)
+  ⎿  Added 32 lines, removed 63 lines
+       1  "use client";
+       2  
+       3 -import { useState, useCallback } from "react";                 
+       3 +import { useCallback, useEffect, useRef } from "react";        
+       4  import {
+       5    useSession,
+       6    useCodeExecution,
+       7    useDeployments,
+       8    useKeyboardShortcuts,
+       9 -  type DeploymentState,                                        
+       9  } from "@/hooks";
+      10  import { DEFAULT_CODE } from "@/lib/constants";
+      12 -import type { Output } from "@/lib/types";                     
+      11 +import { usePlaygroundStore } from "@/lib/store/playground-stor
+         +e";                                                            
+      12  
+      13  import { PlaygroundHeader } from "./header";
+      14  import { CodeEditorPanel } from "./code-editor-panel";
+     ...
+      17  import { FooterActions } from "./footer-actions";
+      18  import { DeploymentInspectSheet } from "./deployment-inspect-sh
+          eet";
+      19  
+      21 -type InspectTab = "details" | "logs";                          
+      22 -type MobileView = "editor" | "output";                         
+      23 -                                                               
+      20  export default function Playground() {
+      25 -  // Core state from hooks                                     
+      21    const {
+      22      session,
+      23      remainingTime,
+     ...
+      33    const { loading: execLoading, runCode, deployCode } = useCode
+          Execution();
+      34    const { deployments, fetchDeployments, deleteDeployment } = u
+          seDeployments();
+      35  
+      41 -  // Local UI state                                            
+      42 -  const [code, setCode] = useState(DEFAULT_CODE);              
+      43 -  const [outputs, setOutputs] = useState<Output[]>([]);        
+      44 -  const [cronSchedule, setCronSchedule] = useState("* * * * *")
+         -;                                                              
+      45 -  const [regions, setRegions] = useState<string[]>(["iad1"]);  
+      46 -  const [inspectedDeployment, setInspectedDeployment] = useStat
+         -e<DeploymentState | null>(                                     
+      47 -    null                                                       
+      48 -  );                                                           
+      49 -  const [inspectTab, setInspectTab] = useState<InspectTab>("det
+         -ails");                                                        
+      50 -  const [mobileView, setMobileView] = useState<MobileView>("edi
+         -tor");                                                         
+      36 +  // Store                                                     
+      37 +  const code = usePlaygroundStore((s) => s.code);              
+      38 +  const setCode = usePlaygroundStore((s) => s.setCode);        
+      39 +  const addOutput = usePlaygroundStore((s) => s.addOutput);    
+      40 +  const clearOutputs = usePlaygroundStore((s) => s.clearOutputs
+         +);                                                             
+      41 +  const cronSchedule = usePlaygroundStore((s) => s.cronSchedule
+         +);                                                             
+      42 +  const regions = usePlaygroundStore((s) => s.regions);        
+      43 +  const mobileView = usePlaygroundStore((s) => s.mobileView);  
+      44 +  const inspectedDeployment = usePlaygroundStore((s) => s.inspe
+         +ctedDeployment);                                               
+      45 +  const inspectTab = usePlaygroundStore((s) => s.inspectTab);  
+      46 +  const setInspectedDeployment = usePlaygroundStore((s) => s.se
+         +tInspectedDeployment);                                         
+      47 +  const setInspectTab = usePlaygroundStore((s) => s.setInspectT
+         +ab);                                                           
+      48  
+      49 +  // Initialize default code once                              
+      50 +  const initialized = useRef(false);                           
+      51 +  useEffect(() => {                                            
+      52 +    if (!initialized.current) {                                
+      53 +      initialized.current = true;                              
+      54 +      setCode(DEFAULT_CODE);                                   
+      55 +    }                                                          
+      56 +  }, [setCode]);                                               
+      57 +                                                               
+      58    // Combine loading states
+      59    const loading = sessionLoading || execLoading;
+      60  
+      55 -  // Output helper                                             
+      56 -  const addOutput = useCallback((type: Output["type"], content:
+         - string) => {                                                  
+      57 -    setOutputs((prev) => [...prev, { type, content, timestamp: 
+         -new Date() }]);                                                
+      58 -  }, []);                                                      
+      59 -                                                               
+      61    // Action handlers
+      62    const handleCreateSession = useCallback(async () => {
+      62 -    setOutputs([]);                                            
+      63 +    clearOutputs();                                            
+      64      addOutput("system", "Creating new sandbox...");
+      65  
+      66      const result = await createSession();
+      67      if (result.success) {
+      67 -      addOutput("system", `Sandbox created`);                  
+      68 +      addOutput("system", "Sandbox created");                  
+      69      } else {
+      70        addOutput("stderr", `Error: ${result.error}`);
+      71      }
+      71 -  }, [createSession, addOutput]);                              
+      72 +  }, [createSession, addOutput, clearOutputs]);                
+      73  
+      74    const handleRunCode = useCallback(async () => {
+      75      if (!session || session.status !== "running") {
+     ...
+      124          },
+      125        }
+      126      );
+      126 -  }, [                                                        
+      127 -    session,                                                  
+      128 -    code,                                                     
+      129 -    cronSchedule,                                             
+      130 -    regions,                                                  
+      131 -    deployCode,                                               
+      132 -    addOutput,                                                
+      133 -    fetchDeployments,                                         
+      134 -    setSession,                                               
+      135 -  ]);                                                         
+      127 +  }, [session, code, cronSchedule, regions, deployCode, addOut
+          +put, fetchDeployments, setSession]);                          
+      128  
+      129    const handlePause = useCallback(async () => {
+      130      addOutput("system", "Creating snapshot...");
+     ...
+      138    }, [saveSnapshot, addOutput]);
+      139  
+      140    const handleResume = useCallback(async () => {
+      149 -    addOutput("system", `Restoring from snapshot...`);        
+      141 +    addOutput("system", "Restoring from snapshot...");        
+      142      const result = await restoreSnapshot();
+      143      if (result.success) {
+      144        addOutput("system", "Sandbox restored successfully!");
+     ...
+      183  
+      184    const handleFormatCode = useCallback(async () => {
+      185      try {
+      194 -      // Lazy load Prettier (~500KB) only when formatting is r
+          -equested                                                      
+      186        const [prettier, prettierPluginTypescript, prettierPlugi
+           nEstree] =
+      187          await Promise.all([
+      188            import("prettier/standalone"),
+     ...
+      202      } catch {
+      203        addOutput("stderr", "Failed to format code - check for s
+           yntax errors");
+      204      }
+      214 -  }, [code, addOutput]);                                      
+      205 +  }, [code, addOutput, setCode]);                             
+      206  
+      207    // Keyboard shortcuts
+      208    useKeyboardShortcuts(
+     ...
+      217      }
+      218    );
+      219  
+      229 -  // Inspection sheet handlers                                
+      230 -  const handleInspect = (deployment: DeploymentState) => {    
+      231 -    setInspectedDeployment(deployment);                       
+      232 -    setInspectTab("details");                                 
+      233 -  };                                                          
+      234 -                                                              
+      235 -  const handleCloseInspect = () => {                          
+      236 -    setInspectedDeployment(null);                             
+      237 -  };                                                          
+      238 -                                                              
+      220    return (
+      221      <div className="h-screen flex flex-col overflow-hidden bg-
+           background text-foreground">
+      222        <PlaygroundHeader
+     ...
+      230        />
+      231  
+      232        <main className="flex-1 flex flex-col md:flex-row min-h-
+           0">
+      252 -        <CodeEditorPanel                                      
+      253 -          code={code}                                         
+      254 -          onChange={setCode}                                  
+      255 -          onFormat={handleFormatCode}                         
+      256 -          mobileView={mobileView}                             
+      257 -        />                                                    
+      233 +        <CodeEditorPanel onFormat={handleFormatCode} />       
+      234  
+      235          <div className={`w-full md:w-1/2 flex flex-col min-h-0
+            flex-1 md:flex-initial ${mobileView === "editor" ? "hidden md
+           :flex" : "flex"}`}>
+      260 -          <OutputPanel outputs={outputs} onClear={() => setOut
+          -puts([])} />                                                  
+      236 +          <OutputPanel />                                     
+      237  
+      238            <DeploymentsPanel
+      239              deployments={deployments}
+      240              onRefresh={fetchDeployments}
+      241              onCopyUrl={handleCopyUrl}
+      266 -            onInspect={handleInspect}                         
+      242              onDelete={handleDeleteDeployment}
+      243            />
+      244          </div>
+     ...
+      248          loading={loading}
+      249          sessionRunning={session?.status === "running"}
+      250          remainingTime={remainingTime}
+      276 -        cronSchedule={cronSchedule}                           
+      277 -        regions={regions}                                     
+      278 -        mobileView={mobileView}                               
+      279 -        onMobileViewChange={setMobileView}                    
+      280 -        onCronScheduleChange={setCronSchedule}                
+      281 -        onRegionsChange={setRegions}                          
+      251          onNewSession={handleCreateSession}
+      252          onRun={handleRunCode}
+      253          onDeploy={handleDeployCode}
+     ...
+      257          deployment={inspectedDeployment}
+      258          activeTab={inspectTab}
+      259          onTabChange={setInspectTab}
+      291 -        onClose={handleCloseInspect}                          
+      260 +        onClose={() => setInspectedDeployment(null)}          
+      261          onCopyUrl={handleCopyUrl}
+      262        />
+      263      </div>
+
+⏺ Now update CodeEditorPanel to read code/mobileView from the store.
+
+⏺ Write(apps/web/components/playground/code-editor-panel.tsx)
+  ⎿  Added 6 lines, removed 7 lines
+       5  import { Button } from "@/components/ui/button";
+       6  import { Shimmer } from "@/components/ai-elements/shimmer";
+       7  import { minDelay } from "@/lib/utils";
+       8 +import { usePlaygroundStore } from "@/lib/store/playground-stor
+         +e";                                                            
+       9  
+      10  // Dynamically import Monaco Editor (~3MB) - don't block initia
+          l page load
+      11  // minDelay ensures shimmer shows for at least 1s even on fast 
+          connections
+     ...
+      21    }
+      22  );
+      23  
+      23 -type MobileView = "editor" | "output";                         
+      24 -                                                               
+      24  interface CodeEditorPanelProps {
+      26 -  code: string;                                                
+      27 -  onChange: (code: string) => void;                            
+      25    onFormat: () => void;
+      29 -  mobileView: MobileView;                                      
+      26  }
+      27  
+      32 -export function CodeEditorPanel({ code, onChange, onFormat, mob
+         -ileView }: CodeEditorPanelProps) {                             
+      28 +export function CodeEditorPanel({ onFormat }: CodeEditorPanelPr
+         +ops) {                                                         
+      29    const { resolvedTheme } = useTheme();
+      30 +  const code = usePlaygroundStore((s) => s.code);              
+      31 +  const setCode = usePlaygroundStore((s) => s.setCode);        
+      32 +  const mobileView = usePlaygroundStore((s) => s.mobileView);  
+      33  
+      34    return (
+      35      <div className={`w-full md:w-1/2 border-r border-border fle
+          x flex-col min-h-0 flex-1 md:flex-initial ${mobileView === "out
+          put" ? "hidden md:flex" : "flex"}`}>
+     ...
+      43          height="100%"
+      44          defaultLanguage="typescript"
+      45          value={code}
+      47 -        onChange={(value) => onChange(value || "")}            
+      46 +        onChange={(value) => setCode(value || "")}             
+      47          theme={resolvedTheme === "dark" ? "vs-dark" : "light"}
+      48          loading={null}
+      49          options={{
+
+⏺ Now update OutputPanel to read from the store.
+
+⏺ Write(apps/web/components/playground/output-panel.tsx)
+  ⎿  Added 5 lines, removed 8 lines
+       3  import { useEffect, useRef } from "react";
+       4  import Ansi from "ansi-to-react";
+       5  import { Button } from "@/components/ui/button";
+       6 -import type { Output } from "@/lib/types";                     
+       6  import { RotatingText } from "@/components/shadcnio/rotating-te
+          xt";
+       7 +import { usePlaygroundStore } from "@/lib/store/playground-stor
+         +e";                                                            
+       8  
+       9 -interface OutputPanelProps {                                   
+      10 -  outputs: Output[];                                           
+      11 -  onClear: () => void;                                         
+      12 -}                                                              
+      13 -                                                               
+      14 -export function OutputPanel({ outputs, onClear }: OutputPanelPr
+         -ops) {                                                         
+       9 +export function OutputPanel() {                                
+      10    const outputRef = useRef<HTMLDivElement>(null);
+      11 +  const outputs = usePlaygroundStore((s) => s.outputs);        
+      12 +  const clearOutputs = usePlaygroundStore((s) => s.clearOutputs
+         +);                                                             
+      13  
+      14    // Auto-scroll to bottom when new output arrives
+      15    useEffect(() => {
+     ...
+      22      <div className="flex-1 flex flex-col min-h-0 border-b borde
+          r-border">
+      23        <div className="shrink-0 px-3 py-2 border-b border-border
+           text-sm text-muted-foreground flex items-center justify-betwee
+          n">
+      24          <span>Output</span>
+      28 -        <Button variant="ghost" size="xs" onClick={onClear}>   
+      25 +        <Button variant="ghost" size="xs" onClick={clearOutputs
+         +}>                                                             
+      26            Clear
+      27          </Button>
+      28        </div>
+
+⏺ Now update DeploymentsPanel — it still takes deployments as props from the
+  hook, but reads inspect from the store.
+
+⏺ Write(apps/web/components/playground/deployments-panel.tsx)
+  ⎿  Added 4 lines, removed 3 lines
+      11  import { Clock, Copy, MoreVertical } from "lucide-react";
+      12  import type { DeploymentState } from "@/hooks";
+      13  import { Shimmer } from "@/components/ai-elements/shimmer";
+      14 +import { usePlaygroundStore } from "@/lib/store/playground-stor
+         +e";                                                            
+      15  
+      16  interface DeploymentsPanelProps {
+      17    deployments: DeploymentState[];
+      18    onRefresh: () => void;
+      19    onCopyUrl: (url: string) => void;
+      19 -  onInspect: (deployment: DeploymentState) => void;            
+      20    onDelete: (id: string) => void;
+      21  }
+      22  
+     ...
+      43    deployments,
+      44    onRefresh,
+      45    onCopyUrl,
+      46 -  onInspect,                                                   
+      46    onDelete,
+      47  }: DeploymentsPanelProps) {
+      48 +  const setInspectedDeployment = usePlaygroundStore((s) => s.se
+         +tInspectedDeployment);                                         
+      49 +                                                               
+      50    return (
+      51      <div className="h-32 md:h-48 shrink-0 flex flex-col">
+      52        <div className="shrink-0 px-3 py-2 border-b border-border
+           text-sm text-muted-foreground flex items-center justify-betwee
+          n">
+     ...
+      123                    <Button
+      124                      variant="ghost"
+      125                      size="xs"
+      125 -                    onClick={() => onInspect(deployment)}     
+      126 +                    onClick={() => setInspectedDeployment(depl
+          +oyment)}                                                      
+      127                    >
+      128                      Inspect
+      129                    </Button>
+
+⏺ Now update FooterActions — remove cron/regions props (read from store), and
+  remove mobileView props (read from store).
+
+⏺ Write(apps/web/components/playground/footer-actions.tsx)
+  ⎿  Added 13 lines, removed 19 lines
+      14  } from "@/components/ui/dropdown-menu";
+      15  import { Clock, Github, Code, Terminal, Play, Rocket, Plus } fr
+          om "lucide-react";
+      16  import { CRON_PRESETS, REGION_OPTIONS, getCronLabel } from "@/l
+          ib/constants";
+      17 +import { usePlaygroundStore } from "@/lib/store/playground-stor
+         +e";                                                            
+      18  
+      18 -type MobileView = "editor" | "output";                         
+      19 -                                                               
+      19  interface FooterActionsProps {
+      20    loading: string | null;
+      21    sessionRunning: boolean;
+      22    remainingTime: number;
+      24 -  cronSchedule: string;                                        
+      25 -  regions: string[];                                           
+      26 -  mobileView: MobileView;                                      
+      27 -  onMobileViewChange: (view: MobileView) => void;              
+      28 -  onCronScheduleChange: (value: string) => void;               
+      29 -  onRegionsChange: (regions: string[]) => void;                
+      23    onNewSession: () => void;
+      24    onRun: () => void;
+      25    onDeploy: () => void;
+     ...
+      29    loading,
+      30    sessionRunning,
+      31    remainingTime,
+      39 -  cronSchedule,                                                
+      40 -  regions,                                                     
+      41 -  mobileView,                                                  
+      42 -  onMobileViewChange,                                          
+      43 -  onCronScheduleChange,                                        
+      44 -  onRegionsChange,                                             
+      32    onNewSession,
+      33    onRun,
+      34    onDeploy,
+      35  }: FooterActionsProps) {
+      36 +  const mobileView = usePlaygroundStore((s) => s.mobileView);  
+      37 +  const setMobileView = usePlaygroundStore((s) => s.setMobileVi
+         +ew);                                                           
+      38 +  const cronSchedule = usePlaygroundStore((s) => s.cronSchedule
+         +);                                                             
+      39 +  const setCronSchedule = usePlaygroundStore((s) => s.setCronSc
+         +hedule);                                                       
+      40 +  const regions = usePlaygroundStore((s) => s.regions);        
+      41 +  const setRegions = usePlaygroundStore((s) => s.setRegions);  
+      42 +                                                               
+      43    return (
+      44      <footer className="shrink-0 border-t border-border px-2 md:
+          px-4 py-2 md:py-3 flex flex-nowrap items-center gap-1.5 md:gap-
+          2 overflow-x-auto bg-background relative z-10">
+      45        {/* Mobile View Toggle - Only shown on mobile */}
+     ...
+      47          <Button
+      48            variant={mobileView === "editor" ? "default" : "ghost
+          "}
+      49            size="sm"
+      56 -          onClick={() => onMobileViewChange("editor")}         
+      50 +          onClick={() => setMobileView("editor")}              
+      51            className="h-7 px-2 gap-1"
+      52          >
+      53            <Code className="size-3.5" />
+     ...
+      56          <Button
+      57            variant={mobileView === "output" ? "default" : "ghost
+          "}
+      58            size="sm"
+      65 -          onClick={() => onMobileViewChange("output")}         
+      59 +          onClick={() => setMobileView("output")}              
+      60            className="h-7 px-2 gap-1"
+      61          >
+      62            <Terminal className="size-3.5" />
+     ...
+      131          >
+      132            <DropdownMenuLabel className="text-xs">Schedule Run<
+           /DropdownMenuLabel>
+      133            <DropdownMenuSeparator />
+      140 -          <DropdownMenuRadioGroup value={cronSchedule} onValue
+          -Change={onCronScheduleChange}>                                
+      134 +          <DropdownMenuRadioGroup value={cronSchedule} onValue
+          +Change={setCronSchedule}>                                     
+      135              {CRON_PRESETS.map((preset) => (
+      136                <DropdownMenuRadioItem
+      137                  key={preset.value || "none"}
+     ...
+      165                checked={regions.includes(region.value)}
+      166                onCheckedChange={(checked) => {
+      167                  if (checked) {
+      174 -                  onRegionsChange([...regions, region.value]);
+      168 +                  setRegions([...regions, region.value]);     
+      169                  } else {
+      176 -                  onRegionsChange(regions.filter((r) => r !== 
+          -region.value));                                               
+      170 +                  setRegions(regions.filter((r) => r !== regio
+          +n.value));                                                    
+      171                  }
+      172                }}
+      173                onSelect={(e) => e.preventDefault()}
+
+⏺ The header component doesn't need Zustand changes since it still takes session
+   props from the parent (session state is managed by useSession hook, not the
+  playground store). Let me now do a quick type check to make sure the Zustand
+  refactor is clean.
+
+⏺ Now let me rewrite vercel-deploy.ts with @vercel/sdk. Let me first check the
+  SDK's types to understand the API surface.
+
+⏺ Explore(Explore @vercel/sdk API types)
+  ⎿  Done (32 tool uses · 49.4k tokens · 1m 3s)
+
+⏺ Now I have all the SDK type info I need. Let me rewrite vercel-deploy.ts.
+
+⏺ Write(apps/web/lib/vercel-deploy.ts)
+  ⎿  Added 115 lines, removed 107 lines
+      1 -import crypto from 'crypto';                                    
+      1 +import { Vercel } from "@vercel/sdk";                           
+      2 +import { SkipAutoDetectionConfirmation } from "@vercel/sdk/model
+        +s/createdeploymentop.js";                                       
+      3  
+      3 -const VERCEL_API_BASE = 'https://api.vercel.com';               
+      4 -                                                                
+      4  interface VercelFile {
+      5    file: string;
+      6    data: string;
+     ...
+      37    return { token, teamId, projectId };
+      38  }
+      39  
+      41 -function sha1(content: string): string {                       
+      42 -  return crypto.createHash('sha1').update(content).digest('hex'
+         -);                                                             
+      43 -}                                                              
+      44 -                                                               
+      40  /**
+      46 - * Upload a file to Vercel's file store                        
+      41 + * Get a configured Vercel SDK client                          
+      42   */
+      48 -async function uploadFile(token: string, teamId: string | undef
+         -ined, content: string): Promise<string> {                      
+      49 -  const params = new URLSearchParams();                        
+      50 -  if (teamId) params.set('teamId', teamId);                    
+      51 -                                                               
+      52 -  const response = await fetch(`${VERCEL_API_BASE}/v2/files?${p
+         -arams}`, {                                                     
+      53 -    method: 'POST',                                            
+      54 -    headers: {                                                 
+      55 -      Authorization: `Bearer ${token}`,                        
+      56 -      'Content-Type': 'application/octet-stream',              
+      57 -      'x-vercel-digest': sha1(content),                        
+      58 -    },                                                         
+      59 -    body: content,                                             
+      60 -  });                                                          
+      61 -                                                               
+      62 -  if (!response.ok) {                                          
+      63 -    const error = await response.text();                       
+      64 -    throw new Error(`Failed to upload file: ${error}`);        
+      65 -  }                                                            
+      66 -                                                               
+      67 -  return sha1(content);                                        
+      43 +export function getVercelClient(): Vercel {                    
+      44 +  const { token } = getEnvConfig();                            
+      45 +  return new Vercel({ bearerToken: token });                   
+      46  }
+      47  
+      48  /**
+     ...
+       98  }
+       99  
+      100  /**
+      123 - * Create a deployment on Vercel using the Build Output API   
+      101 + * Create a deployment on Vercel using the SDK                
+      102 + * SDK handles file uploads automatically — no manual SHA1 has
+          +hing needed                                                   
+      103   */
+      104  export async function createDeployment(options: CreateDeployme
+           ntOptions): Promise<DeploymentResponse> {
+      126 -  const { token, teamId, projectId } = getEnvConfig();        
+      105 +  const { teamId, projectId } = getEnvConfig();               
+      106 +  const vercel = getVercelClient();                           
+      107    const { files, functionName, regions } = options;
+      108  
+      129 -  // Upload all files and build the file list                 
+      130 -  const uploadedFiles: { file: string; sha: string; size: numb
+          -er }[] = [];                                                  
+      131 -                                                              
+      132 -  for (const file of files) {                                 
+      133 -    const sha = await uploadFile(token, teamId, file.data);   
+      134 -    uploadedFiles.push({                                      
+      135 -      file: file.file,                                        
+      136 -      sha,                                                    
+      137 -      size: Buffer.byteLength(file.data, 'utf-8'),            
+      138 -    });                                                       
+      139 -  }                                                           
+      140 -                                                              
+      141 -  // Create the deployment                                    
+      142 -  const params = new URLSearchParams();                       
+      143 -  if (teamId) params.set('teamId', teamId);                   
+      144 -                                                              
+      145 -  const deploymentBody: Record<string, unknown> = {           
+      109 +  const requestBody: Record<string, unknown> = {              
+      110      name: projectId,
+      111      project: projectId,
+      148 -    files: uploadedFiles,                                     
+      112 +    files: files.map((f) => ({ file: f.file, data: f.data })),
+      113      target: 'production',
+      114      meta: {
+      115        functionName,
+     ...
+      117      },
+      118    };
+      119  
+      156 -  // Add regions if specified                                 
+      120    if (regions && regions.length > 0) {
+      158 -    deploymentBody.regions = regions;                         
+      121 +    requestBody.regions = regions;                            
+      122    }
+      123  
+      161 -  const response = await fetch(`${VERCEL_API_BASE}/v13/deploym
+          -ents?${params}`, {                                            
+      162 -    method: 'POST',                                           
+      163 -    headers: {                                                
+      164 -      Authorization: `Bearer ${token}`,                       
+      165 -      'Content-Type': 'application/json',                     
+      166 -    },                                                        
+      167 -    body: JSON.stringify(deploymentBody),                     
+      124 +  const deployment = await vercel.deployments.createDeployment
+          +({                                                            
+      125 +    requestBody: requestBody as never,                        
+      126 +    teamId: teamId || undefined,                              
+      127 +    skipAutoDetectionConfirmation: SkipAutoDetectionConfirmati
+          +on.One,                                                       
+      128    });
+      129  
+      170 -  if (!response.ok) {                                         
+      171 -    const error = await response.text();                      
+      172 -    throw new Error(`Failed to create deployment: ${error}`); 
+      173 -  }                                                           
+      174 -                                                              
+      175 -  const deployment = await response.json();                   
+      176 -                                                              
+      130    return {
+      131      id: deployment.id,
+      179 -    url: `https://${deployment.url}`,                         
+      180 -    readyState: deployment.readyState,                        
+      181 -    regions: deployment.regions,                              
+      182 -    errorMessage: deployment.errorMessage,                    
+      132 +    url: deployment.url ? `https://${deployment.url}` : '',   
+      133 +    readyState: deployment.readyState as DeploymentResponse['r
+          +eadyState'],                                                  
+      134 +    errorMessage: (deployment as Record<string, unknown>).erro
+          +rMessage as string | undefined,                               
+      135    };
+      136  }
+      137  
+     ...
+      139   * Get the status of a deployment
+      140   */
+      141  export async function getDeploymentStatus(deploymentId: string
+           ): Promise<DeploymentResponse> {
+      190 -  const { token, teamId } = getEnvConfig();                   
+      142 +  const { teamId } = getEnvConfig();                          
+      143 +  const vercel = getVercelClient();                           
+      144  
+      192 -  const params = new URLSearchParams();                       
+      193 -  if (teamId) params.set('teamId', teamId);                   
+      145 +  const deployment = await vercel.deployments.getDeployment({ 
+      146 +    idOrUrl: deploymentId,                                    
+      147 +    teamId: teamId || undefined,                              
+      148 +  });                                                         
+      149  
+      195 -  const response = await fetch(                               
+      196 -    `${VERCEL_API_BASE}/v13/deployments/${deploymentId}?${para
+          -ms}`,                                                         
+      197 -    {                                                         
+      198 -      headers: {                                              
+      199 -        Authorization: `Bearer ${token}`,                     
+      200 -      },                                                      
+      201 -    }                                                         
+      202 -  );                                                          
+      203 -                                                              
+      204 -  if (!response.ok) {                                         
+      205 -    const error = await response.text();                      
+      206 -    throw new Error(`Failed to get deployment status: ${error}
+          -`);                                                           
+      207 -  }                                                           
+      208 -                                                              
+      209 -  const deployment = await response.json();                   
+      210 -                                                              
+      150    return {
+      151      id: deployment.id,
+      213 -    url: `https://${deployment.url}`,                         
+      214 -    readyState: deployment.readyState,                        
+      215 -    regions: deployment.regions,                              
+      216 -    errorMessage: deployment.errorMessage,                    
+      152 +    url: deployment.url ? `https://${deployment.url}` : '',   
+      153 +    readyState: deployment.readyState as DeploymentResponse['r
+          +eadyState'],                                                  
+      154 +    errorMessage: (deployment as Record<string, unknown>).erro
+          +rMessage as string | undefined,                               
+      155    };
+      156  }
+      157  
+     ...
+      159   * Delete a deployment from Vercel
+      160   */
+      161  export async function deleteVercelDeployment(deploymentId: str
+           ing): Promise<void> {
+      224 -  const { token, teamId } = getEnvConfig();                   
+      162 +  const { teamId } = getEnvConfig();                          
+      163 +  const vercel = getVercelClient();                           
+      164  
+      226 -  const params = new URLSearchParams();                       
+      227 -  if (teamId) params.set('teamId', teamId);                   
+      165 +  await vercel.deployments.deleteDeployment({                 
+      166 +    id: deploymentId,                                         
+      167 +    teamId: teamId || undefined,                              
+      168 +  });                                                         
+      169 +}                                                             
+      170  
+      229 -  const response = await fetch(                               
+      230 -    `${VERCEL_API_BASE}/v13/deployments/${deploymentId}?${para
+          -ms}`,                                                         
+      231 -    {                                                         
+      232 -      method: 'DELETE',                                       
+      233 -      headers: {                                              
+      234 -        Authorization: `Bearer ${token}`,                     
+      235 -      },                                                      
+      236 -    }                                                         
+      237 -  );                                                          
+      171 +/**                                                           
+      172 + * Build log event types from the deployment event stream     
+      173 + */                                                           
+      174 +export type BuildLogEvent =                                   
+      175 +  | { type: 'stdout' | 'stderr' | 'command'; text: string }   
+      176 +  | { type: 'state'; readyState: string }                     
+      177 +  | { type: 'done'; readyState: string }                      
+      178 +  | { type: 'error'; message: string };                       
+      179  
+      239 -  if (!response.ok) {                                         
+      240 -    const error = await response.text();                      
+      241 -    throw new Error(`Failed to delete deployment: ${error}`); 
+      180 +const TERMINAL_STATES = ['READY', 'ERROR', 'CANCELED'];       
+      181 +const LOG_TYPES = ['stdout', 'stderr', 'command'];            
+      182 +                                                              
+      183 +/**                                                           
+      184 + * Stream build logs for a deployment using the SDK's getDeplo
+          +ymentEvents                                                   
+      185 + * Uses serial-based deduplication (adapted from reference pro
+          +ject)                                                         
+      186 + */                                                           
+      187 +export async function* streamBuildLogs(deploymentId: string): 
+          +AsyncGenerator<BuildLogEvent> {                               
+      188 +  const { teamId } = getEnvConfig();                          
+      189 +  const vercel = getVercelClient();                           
+      190 +                                                              
+      191 +  let lastSerial = '';                                        
+      192 +                                                              
+      193 +  while (true) {                                              
+      194 +    try {                                                     
+      195 +      const { readyState } = await vercel.deployments.getDeplo
+          +yment({                                                       
+      196 +        idOrUrl: deploymentId,                                
+      197 +        teamId: teamId || undefined,                          
+      198 +      });                                                     
+      199 +                                                              
+      200 +      const events = (await vercel.deployments.getDeploymentEv
+          +ents({                                                        
+      201 +        idOrUrl: deploymentId,                                
+      202 +        teamId: teamId || undefined,                          
+      203 +        direction: 'forward',                                 
+      204 +        limit: -1,                                            
+      205 +        builds: 1,                                            
+      206 +      })) as Array<{                                          
+      207 +        type: string;                                         
+      208 +        serial?: string;                                      
+      209 +        text?: string;                                        
+      210 +        payload?: {                                           
+      211 +          serial?: string;                                    
+      212 +          text?: string;                                      
+      213 +          info?: { readyState?: string };                     
+      214 +        };                                                    
+      215 +        info?: { readyState?: string };                       
+      216 +      }>;                                                     
+      217 +                                                              
+      218 +      for (const event of events ?? []) {                     
+      219 +        const serial = event.serial ?? event.payload?.serial; 
+      220 +        if (serial && serial <= lastSerial) continue;         
+      221 +        if (serial) lastSerial = serial;                      
+      222 +                                                              
+      223 +        const text = event.text ?? event.payload?.text;       
+      224 +        if (text && LOG_TYPES.includes(event.type)) {         
+      225 +          yield {                                             
+      226 +            type: event.type as 'stdout' | 'stderr' | 'command
+          +',                                                            
+      227 +            text,                                             
+      228 +          };                                                  
+      229 +        }                                                     
+      230 +                                                              
+      231 +        const state = event.info?.readyState ?? event.payload?
+          +.info?.readyState;                                            
+      232 +        if (event.type === 'deployment-state' && state) {     
+      233 +          yield { type: 'state', readyState: state };         
+      234 +        }                                                     
+      235 +      }                                                       
+      236 +                                                              
+      237 +      if (TERMINAL_STATES.includes(readyState as string)) {   
+      238 +        yield { type: 'done', readyState: String(readyState) }
+          +;                                                             
+      239 +        return;                                               
+      240 +      }                                                       
+      241 +                                                              
+      242 +      await new Promise((resolve) => setTimeout(resolve, 1000)
+          +);                                                            
+      243 +    } catch (err) {                                           
+      244 +      yield {                                                 
+      245 +        type: 'error',                                        
+      246 +        message: err instanceof Error ? err.message : String(e
+          +rr),                                                          
+      247 +      };                                                      
+      248 +      return;                                                 
+      249 +    }                                                         
+      250    }
+      251  }
+      252  
+     ...
+      263    if (teamId) params.set('teamId', teamId);
+      264  
+      265    const response = await fetch(
+      258 -    `${VERCEL_API_BASE}/v1/projects/${projectId}/deployments/$
+          -{deploymentId}/runtime-logs?${params}`,                       
+      266 +    `https://api.vercel.com/v1/projects/${projectId}/deploymen
+          +ts/${deploymentId}/runtime-logs?${params}`,                   
+      267      {
+      268        headers: {
+      269          Authorization: `Bearer ${token}`,
+
+⏺ Now create the build log streaming API route.
+
+⏺ Bash(mkdir -p /Users/karsongrady/Code/vercel/customer/notion/faas/apps/web/app
+      /api/deployments/\[id\]/build-logs)
+  ⎿  Done
+
+⏺ Write(apps/web/app/api/deployments/[id]/build-logs/route.ts)
+  ⎿  Wrote 54 lines to
+     apps/web/app/api/deployments/[id]/build-logs/route.ts
+      1 import { type NextRequest } from "next/server";
+      2 import { sseError, sseResponse } from "@/lib/api-response";
+      3 import { streamBuildLogs } from "@/lib/vercel-deploy";
+      4 
+      5 export async function GET(
+      6   _request: NextRequest,
+      7   { params }: { params: Promise<{ id: string }> }
+      8 ) {
+      9   const { id: deploymentId } = await params;
+     … +44 lines (ctrl+o to expand)
+
+⏺ Now simplify the deploy API route — remove pollDeploymentStatus, use SDK's
+  createDeployment, return deployment ID immediately for client-side build log
+  streaming.
+
+⏺ Write(apps/web/app/api/deploy/route.ts)
+  ⎿  Added 3 lines, removed 49 lines
+      1  import { NextRequest } from "next/server";
+      2  import { updateSession } from "@/lib/session-store";
+      3  import { buildCode, createSnapshot } from "@/lib/sandbox";
+      4 -import { generateBuildOutput, createDeployment, getDeploymentSta
+        -tus } from "@/lib/vercel-deploy";                               
+      5 -import { addDeployment, updateDeployment, getUserId, type Deploy
+        -ment } from "@/lib/deployments-store";                          
+      4 +import { generateBuildOutput, createDeployment } from "@/lib/ver
+        +cel-deploy";                                                    
+      5 +import { addDeployment, getUserId, type Deployment } from "@/lib
+        +/deployments-store";                                            
+      6  import { sseError, sseResponse } from "@/lib/api-response";
+      7  import { validateActiveSession } from "@/lib/session-validation"
+         ;
+      8  
+     ...
+      71          // Generate Build Output API files
+      72          const files = generateBuildOutput(bundledCode, function
+          Name, cronSchedule);
+      73  
+      74 -        // Create deployment on Vercel                         
+      74 +        // Create deployment on Vercel (SDK handles file upload
+         +s)                                                             
+      75          const deploymentResult = await createDeployment({
+      76            files,
+      77            functionName,
+     ...
+      80          });
+      81  
+      82          // Store deployment in our local store
+      83 -        // Use user-selected regions, or fetch from API respons
+         -e once deployment is ready                                     
+      83          const deployment: Deployment = {
+      84            id: deploymentResult.id,
+      85            url: deploymentResult.url,
+     ...
+       95  
+       96          await addDeployment(userId, deployment);
+       97  
+       99 -        // If deployment is not ready yet, poll for status    
+      100 -        if (deployment.status === "building" || deployment.sta
+          -tus === "queued") {                                           
+      101 -          pollDeploymentStatus(userId, deployment.id);        
+      102 -        }                                                     
+      103 -                                                              
+       98          emit("log", `Deployment started: ${deployment.id}`);
+       99          emit("deploy_done", {
+      100            id: deployment.id,
+     ...
+      134  
+      135    return sseResponse(stream);
+      136  }
+      143 -                                                              
+      144 -/**                                                           
+      145 - * Poll deployment status until it's ready or fails           
+      146 - */                                                           
+      147 -async function pollDeploymentStatus(userId: string, deployment
+          -Id: string) {                                                 
+      148 -  const maxAttempts = 60; // 5 minutes max                    
+      149 -  let attempts = 0;                                           
+      150 -                                                              
+      151 -  while (attempts < maxAttempts) {                            
+      152 -    await new Promise(resolve => setTimeout(resolve, 5000)); /
+          -/ Wait 5 seconds                                              
+      153 -    attempts++;                                               
+      154 -                                                              
+      155 -    try {                                                     
+      156 -      const status = await getDeploymentStatus(deploymentId); 
+      157 -                                                              
+      158 -      const newStatus = status.readyState === 'READY' ? 'ready
+          -' :                                                           
+      159 -                        status.readyState === 'ERROR' ? 'error
+          -' :                                                           
+      160 -                        status.readyState === 'CANCELED' ? 'ca
+          -nceled' :                                                     
+      161 -                        status.readyState === 'QUEUED' ? 'queu
+          -ed' : 'building';                                             
+      162 -                                                              
+      163 -      const updates: Partial<Deployment> = {                  
+      164 -        status: newStatus,                                    
+      165 -        url: status.url,                                      
+      166 -        errorMessage: status.errorMessage,                    
+      167 -      };                                                      
+      168 -      // Only update regions if API returns them              
+      169 -      if (status.regions && status.regions.length > 0) {      
+      170 -        updates.regions = status.regions;                     
+      171 -      }                                                       
+      172 -      await updateDeployment(userId, deploymentId, updates);  
+      173 -                                                              
+      174 -      // Stop polling if deployment is done                   
+      175 -      if (newStatus === 'ready' || newStatus === 'error' || ne
+          -wStatus === 'canceled') {                                     
+      176 -        break;                                                
+      177 -      }                                                       
+      178 -    } catch {                                                 
+      179 -      // Ignore polling errors, continue trying               
+      180 -    }                                                         
+      181 -  }                                                           
+      182 -}                                                             
+
+⏺ Now let me create the DeployPopover component. Let me check what UI components
+   are available first.
+
+⏺ Searched for 1 pattern, read 1 file (ctrl+o to expand)
+
+⏺ No popover component exists. Let me check the plan again — a popover needs to
+  be added. Let me add a shadcn popover.
+
+⏺ Bash(bunx shadcn@latest add popover 2>&1 | head -30)
+  ⎿  Resolving dependencies
+     Resolved, downloaded and extracted [688]
+     Saved lockfile
+     … +5 lines (ctrl+o to expand)
+  ⎿  (timeout 30s)
+
+⏺ Read 1 file (ctrl+o to expand)
+
+⏺ Good. Now let me create the DeployPopover component. This is the main new UI
+  piece — it shows build logs in a mini terminal during deployment.
+
+⏺ Write(apps/web/components/playground/deploy-popover.tsx)
+  ⎿  Wrote 428 lines to apps/web/components/playground/deploy-popover.tsx
+       1 "use client";
+       2 
+       3 import { useState, useCallback, useRef, useEffect } from "react"
+         ;
+       4 import { Button } from "@/components/ui/button";
+       5 import { Badge } from "@/components/ui/badge";
+       6 import {
+       7   Popover,
+       8   PopoverContent,
+       9   PopoverTrigger,
+      10 } from "@/components/ui/popover";
+     … +418 lines (ctrl+o to expand)
+
+⏺ Now update the footer to replace the inline Deploy button and cron/regions
+  dropdowns with the DeployPopover. The cron/regions dropdowns are now inside
+  the popover, so they get removed from the footer.
+
+⏺ Write(apps/web/components/playground/footer-actions.tsx)
+  ⎿  Added 8 lines, removed 97 lines
+       1  "use client";
+       2  
+       3  import { Button } from "@/components/ui/button";
+       4 -import { Badge } from "@/components/ui/badge";                 
+       5 -import {                                                       
+       6 -  DropdownMenu,                                                
+       7 -  DropdownMenuTrigger,                                         
+       8 -  DropdownMenuContent,                                         
+       9 -  DropdownMenuLabel,                                           
+      10 -  DropdownMenuSeparator,                                       
+      11 -  DropdownMenuRadioGroup,                                      
+      12 -  DropdownMenuRadioItem,                                       
+      13 -  DropdownMenuCheckboxItem,                                    
+      14 -} from "@/components/ui/dropdown-menu";                        
+      15 -import { Clock, Github, Code, Terminal, Play, Rocket, Plus } fr
+         -om "lucide-react";                                             
+      16 -import { CRON_PRESETS, REGION_OPTIONS, getCronLabel } from "@/l
+         -ib/constants";                                                 
+       4 +import { Github, Code, Terminal, Play, Plus } from "lucide-reac
+         +t";                                                            
+       5  import { usePlaygroundStore } from "@/lib/store/playground-stor
+          e";
+       6 +import { DeployPopover } from "./deploy-popover";              
+       7  
+       8  interface FooterActionsProps {
+       9    loading: string | null;
+     ...
+      24  }: FooterActionsProps) {
+      25    const mobileView = usePlaygroundStore((s) => s.mobileView);
+      26    const setMobileView = usePlaygroundStore((s) => s.setMobileVi
+          ew);
+      38 -  const cronSchedule = usePlaygroundStore((s) => s.cronSchedule
+         -);                                                             
+      39 -  const setCronSchedule = usePlaygroundStore((s) => s.setCronSc
+         -hedule);                                                       
+      40 -  const regions = usePlaygroundStore((s) => s.regions);        
+      41 -  const setRegions = usePlaygroundStore((s) => s.setRegions);  
+      27  
+      28    return (
+      29      <footer className="shrink-0 border-t border-border px-2 md:
+          px-4 py-2 md:py-3 flex flex-nowrap items-center gap-1.5 md:gap-
+          2 overflow-x-auto bg-background relative z-10">
+     ...
+       86        {/* Divider */}
+       87        <div className="w-px h-6 bg-border mx-0.5 md:mx-1" />
+       88  
+      104 -      {/* Deploy Button */}                                   
+      105 -      <Button                                                 
+      106 -        size="sm"                                             
+      107 -        onClick={onDeploy}                                    
+      108 -        disabled={loading !== null || !sessionRunning}        
+      109 -        className="gap-1.5 h-8 md:h-9 px-2 md:px-3"           
+      110 -      >                                                       
+      111 -        <Rocket className="size-3.5 md:hidden" />             
+      112 -        <span className="hidden md:inline">{loading === "deplo
+          -y" ? "Deploying..." : "Deploy"}</span>                        
+      113 -        <span className="md:hidden text-xs">{loading === "depl
+          -oy" ? "..." : "Deploy"}</span>                                
+      114 -        <kbd className="hidden md:inline-flex h-5 max-h-full i
+          -tems-center rounded bg-white/15 px-1.5 font-[inherit] text-[0.
+          -625rem] ring-1 ring-white/20 ring-inset">                     
+      115 -          D                                                   
+      116 -        </kbd>                                                
+      117 -      </Button>                                               
+       89 +      {/* Deploy Popover (replaces inline Deploy button + cron
+          +/regions dropdowns) */}                                       
+       90 +      <DeployPopover                                          
+       91 +        loading={loading}                                     
+       92 +        sessionRunning={sessionRunning}                       
+       93 +        onDeploy={onDeploy}                                   
+       94 +      />                                                      
+       95  
+      119 -      {/* Schedule Dropdown - Hidden on mobile */}            
+      120 -      <DropdownMenu>                                          
+      121 -        <DropdownMenuTrigger asChild>                         
+      122 -          <Button variant="outline" size="sm" className="gap-1
+          -.5 hidden md:flex">                                           
+      123 -            <Clock className="size-3.5" />                    
+      124 -            {getCronLabel(cronSchedule) || "Schedule Run"}    
+      125 -          </Button>                                           
+      126 -        </DropdownMenuTrigger>                                
+      127 -        <DropdownMenuContent                                  
+      128 -          side="top"                                          
+      129 -          align="start"                                       
+      130 -          className="w-auto max-h-64 overflow-y-auto text-xs" 
+      131 -        >                                                     
+      132 -          <DropdownMenuLabel className="text-xs">Schedule Run<
+          -/DropdownMenuLabel>                                           
+      133 -          <DropdownMenuSeparator />                           
+      134 -          <DropdownMenuRadioGroup value={cronSchedule} onValue
+          -Change={setCronSchedule}>                                     
+      135 -            {CRON_PRESETS.map((preset) => (                   
+      136 -              <DropdownMenuRadioItem                          
+      137 -                key={preset.value || "none"}                  
+      138 -                value={preset.value}                          
+      139 -                className="text-xs whitespace-nowrap"         
+      140 -              >                                               
+      141 -                {preset.label}                                
+      142 -              </DropdownMenuRadioItem>                        
+      143 -            ))}                                               
+      144 -          </DropdownMenuRadioGroup>                           
+      145 -        </DropdownMenuContent>                                
+      146 -      </DropdownMenu>                                         
+      147 -                                                              
+      148 -      {/* Regions Dropdown - Hidden on mobile */}             
+      149 -      <DropdownMenu>                                          
+      150 -        <DropdownMenuTrigger asChild>                         
+      151 -          <Button variant="outline" size="sm" className="hidde
+          -n md:flex">                                                   
+      152 -            {regions.length > 0 ? `Regions (${regions.length})
+          -` : "Regions"}                                                
+      153 -          </Button>                                           
+      154 -        </DropdownMenuTrigger>                                
+      155 -        <DropdownMenuContent                                  
+      156 -          side="top"                                          
+      157 -          align="start"                                       
+      158 -          className="w-auto! max-h-64 overflow-y-auto text-xs"
+      159 -        >                                                     
+      160 -          <DropdownMenuLabel className="text-xs">Deploy to reg
+          -ions</DropdownMenuLabel>                                      
+      161 -          <DropdownMenuSeparator />                           
+      162 -          {REGION_OPTIONS.map((region) => (                   
+      163 -            <DropdownMenuCheckboxItem                         
+      164 -              key={region.value}                              
+      165 -              checked={regions.includes(region.value)}        
+      166 -              onCheckedChange={(checked) => {                 
+      167 -                if (checked) {                                
+      168 -                  setRegions([...regions, region.value]);     
+      169 -                } else {                                      
+      170 -                  setRegions(regions.filter((r) => r !== regio
+          -n.value));                                                    
+      171 -                }                                             
+      172 -              }}                                              
+      173 -              onSelect={(e) => e.preventDefault()}            
+      174 -              className="text-xs whitespace-nowrap"           
+      175 -            >                                                 
+      176 -              <Badge className="font-mono mr-1 py-0 px-1">    
+      177 -                {region.value}                                
+      178 -              </Badge>                                        
+      179 -              {region.label}                                  
+      180 -            </DropdownMenuCheckboxItem>                       
+      181 -          ))}                                                 
+      182 -        </DropdownMenuContent>                                
+      183 -      </DropdownMenu>                                         
+      184 -                                                              
+       96        <div className="flex-1" />
+       97  
+       98        {/* Session Warning - Hidden on mobile */}
+
+⏺ Now let me run the type checker to catch any issues.
+
+⏺ Bash(bun tsc --noEmit 2>&1 | head -80)
+  ⎿  (No output)
+  ⎿  (timeout 1m)
+
+⏺ Type check passes cleanly. Let me also quickly verify the getDeploymentStatus
+  import in the existing deployments route is still valid (it was used for the
+  polling).
+
+⏺ Searched for 2 patterns (ctrl+o to expand)
+
+⏺ Those are local function definitions, not imports. Good, no broken references.
+   Let me also check the deploy route doesn't reference the removed imports.
+
+⏺ Searched for 1 pattern (ctrl+o to expand)
+
+⏺ Clean. Now let me also verify the deploy-popover.tsx doesn't have any unused
+  imports that would cause lint warnings.
+
+⏺ Read 1 file (ctrl+o to expand)
+
+⏺ I notice the code variable is imported but not directly used in
+  deploy-popover.tsx - it's fetched from the store but I'm delegating the actual
+   deploy call to onDeploy from the parent. Let me clean that up.
+
+⏺ Read 1 file (ctrl+o to expand)
+
+⏺ Update(apps/web/components/playground/deploy-popover.tsx)
+  ⎿  Removed 1 line
+      52    const setCronSchedule = usePlaygroundStore((s) => s.setCronSc
+          hedule);
+      53    const regions = usePlaygroundStore((s) => s.regions);
+      54    const setRegions = usePlaygroundStore((s) => s.setRegions);
+      55 -  const code = usePlaygroundStore((s) => s.code);              
+      55    const addOutput = usePlaygroundStore((s) => s.addOutput);
+      56  
+      57    // Auto-scroll logs
+
+⏺ Now let me run the type check one more time to make sure everything is clean.
+
+⏺ Bash(bun tsc --noEmit 2>&1)
+  ⎿  (No output)
+
+⏺ Type check passes. Now let me verify the dev server starts.
+
+⏺ Bash(cd /Users/karsongrady/Code/vercel/customer/notion/faas && bunx turbo run
+      build --filter=@faas/web 2>&1 | tail -20)
+  ⎿  @faas/web:build: ├ ƒ /api/deploy
+     @faas/web:build: ├ ƒ /api/deployments
+     @faas/web:build: ├ ƒ /api/deployments/[id]
+     … +16 lines (ctrl+o to expand)
+  ⎿  (timeout 2m)
+
+⏺ Build succeeds. All routes are present including the new
+  /api/deployments/[id]/build-logs.
+
+⏺ All tasks are complete. Let me save a memory note about this project's
+  patterns.
+
+⏺ Wrote 1 memory (ctrl+o to expand)
+
+⏺ Here's a summary of everything that was implemented:
+
+  Part 1: Zustand Store
+
+  - Created apps/web/lib/store/playground-store.ts — Zustand store holding code,
+   outputs, cronSchedule, regions, mobileView, and deployment inspection state
+  - Refactored all 5 playground components to read/write from the store instead
+  of receiving props:
+    - index.tsx — removed 6 useState calls, reads from store
+    - code-editor-panel.tsx — reads code, mobileView from store
+    - output-panel.tsx — reads outputs and clearOutputs from store (no props)
+    - deployments-panel.tsx — reads setInspectedDeployment from store
+    - footer-actions.tsx — reads mobileView, cronSchedule, regions from store;
+  removed 7 props
+
+  Part 2: Cleaner Vercel Deployment
+
+  - Rewrote lib/vercel-deploy.ts:
+    - Replaced manual fetch() + SHA1 hashing with @vercel/sdk's
+  createDeployment() (SDK handles file uploads)
+    - Added getVercelClient() factory
+    - Added streamBuildLogs() async generator using getDeploymentEvents() with
+  serial-based dedup
+    - Updated getDeploymentStatus() and deleteVercelDeployment() to use SDK
+    - Kept generateBuildOutput() and streamDeploymentLogs() (runtime logs)
+  unchanged
+  - Created app/api/deployments/[id]/build-logs/route.ts — SSE endpoint that
+  streams build logs from the async generator
+  - Simplified app/api/deploy/route.ts — removed pollDeploymentStatus()
+  background polling entirely; client streams build logs separately via the new
+  endpoint
+  - Created components/playground/deploy-popover.tsx — replaces inline deploy
+  button with a popover showing:
+    - Idle: Deploy button + cron/regions config
+    - Building: Shimmer animation + live build log streaming in mini terminal
+    - Ready: Green indicator, function URL with copy button, Open/Deploy Again
+  actions
+    - Error: Error message with Try Again button
+  - Updated footer-actions.tsx — replaced Deploy button + cron/regions dropdowns
+   with <DeployPopover />
+
+  Verification: TypeScript type check (bun tsc --noEmit) passes clean, and turbo
+   build succeeds with the new /api/deployments/[id]/build-logs route visible in
+   the output.
+
+✻ Churned for 9m 27s

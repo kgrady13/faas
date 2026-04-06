@@ -5,6 +5,7 @@ import { useTheme } from "next-themes";
 import { Button } from "@/components/ui/button";
 import { Shimmer } from "@/components/ai-elements/shimmer";
 import { minDelay } from "@/lib/utils";
+import { usePlaygroundStore } from "@/lib/store/playground-store";
 
 // Dynamically import Monaco Editor (~3MB) - don't block initial page load
 // minDelay ensures shimmer shows for at least 1s even on fast connections
@@ -20,17 +21,15 @@ const Editor = dynamic(
   }
 );
 
-type MobileView = "editor" | "output";
-
 interface CodeEditorPanelProps {
-  code: string;
-  onChange: (code: string) => void;
   onFormat: () => void;
-  mobileView: MobileView;
 }
 
-export function CodeEditorPanel({ code, onChange, onFormat, mobileView }: CodeEditorPanelProps) {
+export function CodeEditorPanel({ onFormat }: CodeEditorPanelProps) {
   const { resolvedTheme } = useTheme();
+  const code = usePlaygroundStore((s) => s.code);
+  const setCode = usePlaygroundStore((s) => s.setCode);
+  const mobileView = usePlaygroundStore((s) => s.mobileView);
 
   return (
     <div className={`w-full md:w-1/2 border-r border-border flex flex-col min-h-0 flex-1 md:flex-initial ${mobileView === "output" ? "hidden md:flex" : "flex"}`}>
@@ -44,7 +43,7 @@ export function CodeEditorPanel({ code, onChange, onFormat, mobileView }: CodeEd
         height="100%"
         defaultLanguage="typescript"
         value={code}
-        onChange={(value) => onChange(value || "")}
+        onChange={(value) => setCode(value || "")}
         theme={resolvedTheme === "dark" ? "vs-dark" : "light"}
         loading={null}
         options={{

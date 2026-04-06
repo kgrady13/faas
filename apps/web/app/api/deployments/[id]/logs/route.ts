@@ -17,6 +17,17 @@ export async function GET(
     );
   }
 
+  // Determine project ID: per-user project if available, fall back to env
+  const projectId =
+    deployment.vercelProjectId || process.env.VERCEL_WORKER_PROJECT_ID;
+
+  if (!projectId) {
+    return new Response(
+      JSON.stringify({ success: false, error: "No project ID available for this deployment" }),
+      { status: 500, headers: { "Content-Type": "application/json" } }
+    );
+  }
+
   // Create a custom ReadableStream that first sends "connected" then pipes Vercel logs
   const encoder = new TextEncoder();
 
@@ -28,7 +39,7 @@ export async function GET(
       );
 
       try {
-        const logStream = await streamDeploymentLogs(id);
+        const logStream = await streamDeploymentLogs(id, projectId);
         const reader = logStream.getReader();
         const decoder = new TextDecoder();
         let buffer = "";

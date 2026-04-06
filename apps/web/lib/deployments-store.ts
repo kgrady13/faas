@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { redis } from "./redis";
-import type { Deployment } from "./types";
+import type { Deployment, UserProject } from "./types";
 
 export type { Deployment };
 
@@ -21,6 +21,24 @@ export function getUserId(request: NextRequest): string {
 // Key helpers scoped by user
 const deploymentKey = (userId: string, id: string) => `deployment:${userId}:${id}`;
 const deploymentIdsKey = (userId: string) => `deployments:${userId}:ids`;
+const userProjectKey = (userId: string) => `project:${userId}`;
+
+// ── User-project mapping ──────────────────────────────────────────────
+
+export async function getUserProject(userId: string): Promise<UserProject | null> {
+  return (await redis.get<UserProject>(userProjectKey(userId))) || null;
+}
+
+export async function setUserProject(userId: string, project: UserProject): Promise<void> {
+  await redis.set(userProjectKey(userId), project);
+}
+
+export async function deleteUserProject(userId: string): Promise<boolean> {
+  const result = await redis.del(userProjectKey(userId));
+  return result > 0;
+}
+
+// ── Deployments ───────────────────────────────────────────────────────
 
 export async function getDeployment(userId: string, id: string): Promise<Deployment | null> {
   const deployment = await redis.get<Deployment>(deploymentKey(userId, id));

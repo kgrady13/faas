@@ -1,6 +1,8 @@
-import crypto from 'crypto';
-
-const VERCEL_API_BASE = 'https://api.vercel.com';
+import { createHash } from "crypto";
+import { Vercel } from "@vercel/sdk";
+import { SkipAutoDetectionConfirmation } from "@vercel/sdk/models/createdeploymentop.js";
+import { getUserProject, setUserProject } from "./deployments-store";
+import type { UserProject, UsageSummary, UsageCharge } from "./types";
 
 interface VercelFile {
   file: string;
@@ -26,45 +28,89 @@ interface DeploymentResponse {
 function getEnvConfig() {
   const token = process.env.VERCEL_API_TOKEN;
   const teamId = process.env.VERCEL_TEAM_ID;
-  const projectId = process.env.VERCEL_WORKER_PROJECT_ID;
+  // Fallback project ID for legacy deployments (optional with per-user projects)
+  const fallbackProjectId = process.env.VERCEL_WORKER_PROJECT_ID;
 
   if (!token) {
     throw new Error('VERCEL_API_TOKEN environment variable is required');
   }
-  if (!projectId) {
-    throw new Error('VERCEL_WORKER_PROJECT_ID environment variable is required');
-  }
 
-  return { token, teamId, projectId };
-}
-
-function sha1(content: string): string {
-  return crypto.createHash('sha1').update(content).digest('hex');
+  return { token, teamId, fallbackProjectId };
 }
 
 /**
- * Upload a file to Vercel's file store
+ * Get a configured Vercel SDK client
  */
-async function uploadFile(token: string, teamId: string | undefined, content: string): Promise<string> {
-  const params = new URLSearchParams();
-  if (teamId) params.set('teamId', teamId);
+export function getVercelClient(): Vercel {
+  const { token } = getEnvConfig();
+  return new Vercel({ bearerToken: token });
+}
 
-  const response = await fetch(`${VERCEL_API_BASE}/v2/files?${params}`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/octet-stream',
-      'x-vercel-digest': sha1(content),
-    },
-    body: content,
-  });
+/**
+ * Generate a deterministic, DNS-safe project name from a userId.
+ * SHA-256 hash avoids leaking the raw IP into Vercel project names.
+ */
+export function generateProjectName(userId: string): string {
+  const hash = createHash('sha256').update(userId).digest('hex').slice(0, 12);
+  return `faas-${hash}`;
+}
 
-  if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`Failed to upload file: ${error}`);
+/**
+ * Ensure a per-user Vercel project exists. Creates one lazily on first deploy.
+ * Checks Redis first (fast path), then creates via Vercel SDK if needed.
+ */
+export async function ensureUserProject(userId: string): Promise<UserProject> {
+  const existing = await getUserProject(userId);
+  if (existing) return existing;
+
+  const { teamId } = getEnvConfig();
+  const vercel = getVercelClient();
+  const projectName = generateProjectName(userId);
+
+  try {
+    const response = await vercel.projects.createProject({
+      teamId: teamId || undefined,
+      requestBody: { name: projectName },
+    });
+
+    const userProject: UserProject = {
+      vercelProjectId: response.id,
+      projectName: response.name,
+      createdAt: new Date().toISOString(),
+    };
+
+    await setUserProject(userId, userProject);
+    return userProject;
+  } catch (error: unknown) {
+    // Handle 409 conflict — project exists in Vercel but not in Redis
+    const is409 =
+      error instanceof Error &&
+      (error.message.includes('409') || error.message.includes('already exists'));
+
+    if (is409) {
+      const result = await vercel.projects.getProjects({
+        teamId: teamId || undefined,
+        search: projectName,
+      });
+
+      const projects = 'projects' in result ? result.projects : result;
+      const found = projects?.find(
+        (p: { name: string }) => p.name === projectName
+      );
+
+      if (found) {
+        const userProject: UserProject = {
+          vercelProjectId: found.id as string,
+          projectName: found.name as string,
+          createdAt: new Date().toISOString(),
+        };
+        await setUserProject(userId, userProject);
+        return userProject;
+      }
+    }
+
+    throw error;
   }
-
-  return sha1(content);
 }
 
 /**
@@ -120,32 +166,20 @@ export function generateBuildOutput(
 }
 
 /**
- * Create a deployment on Vercel using the Build Output API
+ * Create a deployment on Vercel using the SDK
+ * SDK handles file uploads automatically — no manual SHA1 hashing needed
  */
-export async function createDeployment(options: CreateDeploymentOptions): Promise<DeploymentResponse> {
-  const { token, teamId, projectId } = getEnvConfig();
-  const { files, functionName, regions } = options;
+export async function createDeployment(
+  options: CreateDeploymentOptions & { projectId: string }
+): Promise<DeploymentResponse> {
+  const { teamId } = getEnvConfig();
+  const vercel = getVercelClient();
+  const { files, functionName, regions, projectId } = options;
 
-  // Upload all files and build the file list
-  const uploadedFiles: { file: string; sha: string; size: number }[] = [];
-
-  for (const file of files) {
-    const sha = await uploadFile(token, teamId, file.data);
-    uploadedFiles.push({
-      file: file.file,
-      sha,
-      size: Buffer.byteLength(file.data, 'utf-8'),
-    });
-  }
-
-  // Create the deployment
-  const params = new URLSearchParams();
-  if (teamId) params.set('teamId', teamId);
-
-  const deploymentBody: Record<string, unknown> = {
+  const requestBody: Record<string, unknown> = {
     name: projectId,
     project: projectId,
-    files: uploadedFiles,
+    files: files.map((f) => ({ file: f.file, data: f.data })),
     target: 'production',
     meta: {
       functionName,
@@ -153,33 +187,21 @@ export async function createDeployment(options: CreateDeploymentOptions): Promis
     },
   };
 
-  // Add regions if specified
   if (regions && regions.length > 0) {
-    deploymentBody.regions = regions;
+    requestBody.regions = regions;
   }
 
-  const response = await fetch(`${VERCEL_API_BASE}/v13/deployments?${params}`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(deploymentBody),
+  const deployment = await vercel.deployments.createDeployment({
+    requestBody: requestBody as never,
+    teamId: teamId || undefined,
+    skipAutoDetectionConfirmation: SkipAutoDetectionConfirmation.One,
   });
-
-  if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`Failed to create deployment: ${error}`);
-  }
-
-  const deployment = await response.json();
 
   return {
     id: deployment.id,
-    url: `https://${deployment.url}`,
-    readyState: deployment.readyState,
-    regions: deployment.regions,
-    errorMessage: deployment.errorMessage,
+    url: deployment.url ? `https://${deployment.url}` : '',
+    readyState: deployment.readyState as DeploymentResponse['readyState'],
+    errorMessage: (deployment as Record<string, unknown>).errorMessage as string | undefined,
   };
 }
 
@@ -187,33 +209,19 @@ export async function createDeployment(options: CreateDeploymentOptions): Promis
  * Get the status of a deployment
  */
 export async function getDeploymentStatus(deploymentId: string): Promise<DeploymentResponse> {
-  const { token, teamId } = getEnvConfig();
+  const { teamId } = getEnvConfig();
+  const vercel = getVercelClient();
 
-  const params = new URLSearchParams();
-  if (teamId) params.set('teamId', teamId);
-
-  const response = await fetch(
-    `${VERCEL_API_BASE}/v13/deployments/${deploymentId}?${params}`,
-    {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    }
-  );
-
-  if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`Failed to get deployment status: ${error}`);
-  }
-
-  const deployment = await response.json();
+  const deployment = await vercel.deployments.getDeployment({
+    idOrUrl: deploymentId,
+    teamId: teamId || undefined,
+  });
 
   return {
     id: deployment.id,
-    url: `https://${deployment.url}`,
-    readyState: deployment.readyState,
-    regions: deployment.regions,
-    errorMessage: deployment.errorMessage,
+    url: deployment.url ? `https://${deployment.url}` : '',
+    readyState: deployment.readyState as DeploymentResponse['readyState'],
+    errorMessage: (deployment as Record<string, unknown>).errorMessage as string | undefined,
   };
 }
 
@@ -221,24 +229,94 @@ export async function getDeploymentStatus(deploymentId: string): Promise<Deploym
  * Delete a deployment from Vercel
  */
 export async function deleteVercelDeployment(deploymentId: string): Promise<void> {
-  const { token, teamId } = getEnvConfig();
+  const { teamId } = getEnvConfig();
+  const vercel = getVercelClient();
 
-  const params = new URLSearchParams();
-  if (teamId) params.set('teamId', teamId);
+  await vercel.deployments.deleteDeployment({
+    id: deploymentId,
+    teamId: teamId || undefined,
+  });
+}
 
-  const response = await fetch(
-    `${VERCEL_API_BASE}/v13/deployments/${deploymentId}?${params}`,
-    {
-      method: 'DELETE',
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
+/**
+ * Build log event types from the deployment event stream
+ */
+export type BuildLogEvent =
+  | { type: 'stdout' | 'stderr' | 'command'; text: string }
+  | { type: 'state'; readyState: string }
+  | { type: 'done'; readyState: string }
+  | { type: 'error'; message: string };
+
+const TERMINAL_STATES = ['READY', 'ERROR', 'CANCELED'];
+const LOG_TYPES = ['stdout', 'stderr', 'command'];
+
+/**
+ * Stream build logs for a deployment using the SDK's getDeploymentEvents
+ * Uses serial-based deduplication (adapted from reference project)
+ */
+export async function* streamBuildLogs(deploymentId: string): AsyncGenerator<BuildLogEvent> {
+  const { teamId } = getEnvConfig();
+  const vercel = getVercelClient();
+
+  let lastSerial = '';
+
+  while (true) {
+    try {
+      const { readyState } = await vercel.deployments.getDeployment({
+        idOrUrl: deploymentId,
+        teamId: teamId || undefined,
+      });
+
+      const events = (await vercel.deployments.getDeploymentEvents({
+        idOrUrl: deploymentId,
+        teamId: teamId || undefined,
+        direction: 'forward',
+        limit: -1,
+        builds: 1,
+      })) as Array<{
+        type: string;
+        serial?: string;
+        text?: string;
+        payload?: {
+          serial?: string;
+          text?: string;
+          info?: { readyState?: string };
+        };
+        info?: { readyState?: string };
+      }>;
+
+      for (const event of events ?? []) {
+        const serial = event.serial ?? event.payload?.serial;
+        if (serial && serial <= lastSerial) continue;
+        if (serial) lastSerial = serial;
+
+        const text = event.text ?? event.payload?.text;
+        if (text && LOG_TYPES.includes(event.type)) {
+          yield {
+            type: event.type as 'stdout' | 'stderr' | 'command',
+            text,
+          };
+        }
+
+        const state = event.info?.readyState ?? event.payload?.info?.readyState;
+        if (event.type === 'deployment-state' && state) {
+          yield { type: 'state', readyState: state };
+        }
+      }
+
+      if (TERMINAL_STATES.includes(readyState as string)) {
+        yield { type: 'done', readyState: String(readyState) };
+        return;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    } catch (err) {
+      yield {
+        type: 'error',
+        message: err instanceof Error ? err.message : String(err),
+      };
+      return;
     }
-  );
-
-  if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`Failed to delete deployment: ${error}`);
   }
 }
 
@@ -247,15 +325,16 @@ export async function deleteVercelDeployment(deploymentId: string): Promise<void
  * Returns a ReadableStream of JSON log objects
  */
 export async function streamDeploymentLogs(
-  deploymentId: string
+  deploymentId: string,
+  projectId: string
 ): Promise<ReadableStream<Uint8Array>> {
-  const { token, teamId, projectId } = getEnvConfig();
+  const { token, teamId } = getEnvConfig();
 
   const params = new URLSearchParams();
   if (teamId) params.set('teamId', teamId);
 
   const response = await fetch(
-    `${VERCEL_API_BASE}/v1/projects/${projectId}/deployments/${deploymentId}/runtime-logs?${params}`,
+    `https://api.vercel.com/v1/projects/${projectId}/deployments/${deploymentId}/runtime-logs?${params}`,
     {
       headers: {
         Authorization: `Bearer ${token}`,
@@ -274,4 +353,56 @@ export async function streamDeploymentLogs(
   }
 
   return response.body;
+}
+
+/**
+ * Fetch billing charges for a specific project using the Vercel SDK.
+ * Filters FOCUS v1.3 charge stream by ProjectId tag, aggregates into a summary.
+ */
+export async function getUserUsage(
+  projectId: string,
+  from: string,
+  to: string
+): Promise<UsageSummary> {
+  const { teamId } = getEnvConfig();
+  const vercel = getVercelClient();
+
+  const stream = await vercel.billing.listBillingCharges({
+    from,
+    to,
+    teamId: teamId || undefined,
+  });
+
+  const charges: UsageCharge[] = [];
+  let totalBilledCost = 0;
+  let totalEffectiveCost = 0;
+
+  for await (const charge of stream) {
+    if (charge.tags?.ProjectId !== projectId) continue;
+
+    charges.push({
+      serviceName: charge.serviceName,
+      billedCost: charge.billedCost,
+      effectiveCost: charge.effectiveCost,
+      consumedQuantity: charge.consumedQuantity,
+      consumedUnit: charge.consumedUnit,
+      chargePeriodStart: charge.chargePeriodStart,
+      chargePeriodEnd: charge.chargePeriodEnd,
+      regionId: charge.regionId,
+      regionName: charge.regionName,
+    });
+
+    totalBilledCost += charge.billedCost;
+    totalEffectiveCost += charge.effectiveCost;
+  }
+
+  return {
+    totalBilledCost,
+    totalEffectiveCost,
+    charges,
+    periodStart: from,
+    periodEnd: to,
+    projectId,
+    projectName: '',
+  };
 }

@@ -13,14 +13,20 @@ This is a **Turborepo monorepo** with the following apps:
 
 ## Vercel Projects
 
-Two separate Vercel projects:
-
 | App                | Project Name       | Purpose                                          |
 | ------------------ | ------------------ | ------------------------------------------------ |
 | `apps/web`         | `faas`             | The FaaS platform UI where users write/test code |
-| `apps/deployments` | `faas-deployments` | Target project for deployed user functions       |
+| `apps/deployments` | `faas-deployments` | Legacy shared deployment target (deprecated)     |
 
-The web app deploys user functions TO the `faas-deployments` project via the Vercel API.
+### Per-User Projects
+
+Each user gets their own Vercel project, created lazily on first deploy:
+
+- **Naming**: `faas-{hash}` where hash = first 12 chars of SHA-256(userId). DNS-safe, deterministic, doesn't leak raw IP.
+- **Creation**: `ensureUserProject(userId)` in `vercel-deploy.ts` checks Redis first, creates via SDK if needed.
+- **Storage**: Redis key `project:{userId}` → `UserProject { vercelProjectId, projectName, createdAt }`
+- **Benefit**: Enables per-user billing attribution via Vercel's FOCUS billing charges API.
+- **Legacy fallback**: `VERCEL_WORKER_PROJECT_ID` env var still used for old deployments without a `vercelProjectId` field.
 
 ## Tech Stack
 
@@ -66,7 +72,16 @@ cd apps/web && bun tsc --noEmit   # Type check web app
 
 - Deployments persisted in **Upstash Redis**
 - User isolation via IP address extracted from `x-forwarded-for` header (PoC ONLY solution)
-- Deployments include: id, url, functionName, createdAt, status, cronSchedule, regions, errorMessage, buildLogs
+- Deployments include: id, url, functionName, createdAt, status, cronSchedule, regions, errorMessage, buildLogs, vercelProjectId
+- User-to-project mapping stored at Redis key `project:{userId}` → `UserProject`
+
+### Usage Tracking
+
+- `GET /api/usage?from=&to=` — queries Vercel FOCUS v1.3 billing charges API, filtered by user's project
+- Uses `@vercel/sdk` `billing.listBillingCharges()` — returns async iterable JSONL stream
+- Charges filtered by `tags.ProjectId` matching the user's per-user Vercel project
+- Default date range: current calendar month
+- UI: usage summary shown at top of deployments panel (total cost + top 3 services)
 
 ### Build Process (Bun)
 
@@ -77,6 +92,8 @@ cd apps/web && bun tsc --noEmit   # Type check web app
 - Source path: `/tmp/src/handler.ts`
 
 ### Vercel Deployment (Bun Runtime)
+
+Deployments go to the user's per-user Vercel project (not a shared project). The deploy route calls `ensureUserProject(userId)` to lazily create the project, then passes `projectId` to `createDeployment()`.
 
 **Key insight**: Vercel's **Bun runtime** (`bun1.x`) natively supports Web Standard `Request/Response` handlers - no wrapper needed!
 
@@ -132,6 +149,9 @@ Discriminated union patterns in `lib/types.ts`:
 - `ApiResponse<T> = ApiSuccessResponse<T> | ApiErrorResponse`
 - SSE events typed with `SSEEventType` and `SSEEvent<T>`
 - Runtime logs include context: requestMethod, requestPath, responseStatusCode
+- `UserProject` — per-user Vercel project mapping (Redis)
+- `UsageSummary` / `UsageCharge` — billing data from FOCUS v1.3 API
+- `Deployment.vercelProjectId` — optional field linking deployment to its per-user project
 
 ## Environment Variables
 
@@ -140,14 +160,14 @@ See `apps/web/.env.example` for the full template.
 ```bash
 # Required - Vercel Deployment
 VERCEL_API_TOKEN         # Vercel API token (https://vercel.com/account/tokens)
-VERCEL_WORKER_PROJECT_ID # Target project ID for deployments
 
 # Required - Redis Storage (Upstash/Vercel KV)
 KV_REST_API_URL          # Upstash Redis REST API endpoint
 KV_REST_API_TOKEN        # Upstash REST API token (read/write)
 
 # Optional
-VERCEL_TEAM_ID           # Team scope for API calls
+VERCEL_TEAM_ID           # Team scope for API calls (used for project creation & billing)
+VERCEL_WORKER_PROJECT_ID # (Deprecated) Fallback project ID for legacy deployments
 VERCEL_OIDC_TOKEN        # Secure OIDC authentication
 KV_REST_API_READ_ONLY_TOKEN  # Read-only token (if needed)
 KV_URL                   # Vercel KV connection URL
@@ -178,7 +198,9 @@ faas/                           # Monorepo root
 │   │   │   │   │   ├── route.ts            # List deployments
 │   │   │   │   │   └── [id]/
 │   │   │   │   │       ├── route.ts        # Get/delete deployment
-│   │   │   │   │       └── logs/route.ts   # Get deployment logs
+│   │   │   │   │       ├── logs/route.ts   # Get deployment logs
+│   │   │   │   │       └── build-logs/route.ts  # Stream build logs (SSE)
+│   │   │   │   ├── usage/route.ts          # Per-user billing usage
 │   │   │   │   ├── snapshot/route.ts       # Create snapshot
 │   │   │   │   └── restore/route.ts        # Restore snapshot
 │   │   │   ├── page.tsx                    # Renders Playground
@@ -205,7 +227,8 @@ faas/                           # Monorepo root
 │   │   │   ├── use-deployments.ts          # Deployments CRUD
 │   │   │   ├── use-code-execution.ts       # Run/build operations
 │   │   │   ├── use-keyboard-shortcuts.ts   # Hotkey bindings
-│   │   │   └── use-runtime-logs.ts         # Live log streaming
+│   │   │   ├── use-runtime-logs.ts         # Live log streaming
+│   │   │   └── use-usage.ts               # Per-user billing usage
 │   │   ├── lib/
 │   │   │   ├── api-response.ts             # Standardized API responses
 │   │   │   ├── constants.ts                # Cron presets, regions, defaults

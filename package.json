@@ -13,6 +13,6 @@
     "start": "turbo run start"
   },
   "devDependencies": {
-    "turbo": "^2.7.5"
+    "turbo": "^2.8.4"
   }
 }

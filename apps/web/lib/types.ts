@@ -31,6 +31,37 @@ export interface Deployment {
   regions?: string[];
   errorMessage?: string;
   buildLogs?: string[];
+  vercelProjectId?: string; // Per-user Vercel project ID (absent for legacy deployments)
+}
+
+// Per-user Vercel project mapping (stored in Redis)
+export interface UserProject {
+  vercelProjectId: string;
+  projectName: string;
+  createdAt: string; // ISO string
+}
+
+// Billing/usage types (FOCUS v1.3 format)
+export interface UsageCharge {
+  serviceName: string;
+  billedCost: number;
+  effectiveCost: number;
+  consumedQuantity: number;
+  consumedUnit: string;
+  chargePeriodStart: string;
+  chargePeriodEnd: string;
+  regionId?: string;
+  regionName?: string;
+}
+
+export interface UsageSummary {
+  totalBilledCost: number;
+  totalEffectiveCost: number;
+  charges: UsageCharge[];
+  periodStart: string;
+  periodEnd: string;
+  projectId: string;
+  projectName: string;
 }
 
 export interface DeploymentWithFunctionUrl extends Deployment {
