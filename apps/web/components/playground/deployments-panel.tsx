@@ -74,6 +74,9 @@ function UsageSummarySection({
     .sort((a, b) => b[1] - a[1])
     .slice(0, 3);
 
+  const sbx = usage.sandboxUsage;
+  const totalCost = usage.totalBilledCost + (sbx?.estimatedCost.totalCost ?? 0);
+
   return (
     <div className="px-3 py-2 border-b border-border space-y-1">
       <div className="flex items-center justify-between">
@@ -92,7 +95,7 @@ function UsageSummarySection({
       <div className="flex items-center justify-between">
         <span className="text-xs text-muted-foreground">Total Cost</span>
         <span className="text-sm font-mono font-medium">
-          ${usage.totalBilledCost.toFixed(4)}
+          ${totalCost.toFixed(4)}
         </span>
       </div>
       {topServices.map(([name, cost]) => (
@@ -103,6 +106,34 @@ function UsageSummarySection({
           <span className="text-xs font-mono">${cost.toFixed(4)}</span>
         </div>
       ))}
+      {sbx && (
+        <>
+          <div className="flex items-center justify-between pt-1">
+            <span className="text-xs text-muted-foreground uppercase tracking-wide">
+              Sandbox (est.)
+            </span>
+            <span className="text-xs font-mono font-medium">
+              ${sbx.estimatedCost.totalCost.toFixed(4)}
+            </span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-muted-foreground">Active CPU</span>
+            <span className="text-xs font-mono">
+              {(sbx.totals.totalActiveCpuMs / 60_000).toFixed(1)} min
+            </span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-muted-foreground">Data Transfer</span>
+            <span className="text-xs font-mono">
+              {((sbx.totals.totalEgressBytes + sbx.totals.totalIngressBytes) / 1_048_576).toFixed(1)} MB
+            </span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-muted-foreground">Sessions</span>
+            <span className="text-xs font-mono">{sbx.totals.totalSessions}</span>
+          </div>
+        </>
+      )}
     </div>
   );
 }

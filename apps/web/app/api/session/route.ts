@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { getSession, setSession, clearSession } from "@/lib/session-store";
-import { getOrCreateSandbox, stopSandbox, generateSandboxName } from "@/lib/sandbox";
+import { getOrCreateSandbox, stopSandbox, generateSandboxName, loadCode } from "@/lib/sandbox";
 import { getUserId } from "@/lib/deployments-store";
 import { jsonSuccess, jsonError } from "@/lib/api-response";
 
@@ -17,7 +17,15 @@ export async function POST(request: NextRequest) {
     }
 
     // Get existing sandbox or create a new one (persistent by default)
-    const sandbox = await getOrCreateSandbox(sandboxName);
+    await getOrCreateSandbox(sandboxName);
+
+    // Try to load persisted code from the sandbox filesystem
+    let code: string | null = null;
+    try {
+      code = await loadCode(sandboxName);
+    } catch {
+      // New sandbox or file doesn't exist yet — that's fine
+    }
 
     const session = {
       sandboxName,
@@ -33,6 +41,7 @@ export async function POST(request: NextRequest) {
         ...session,
         remainingTime: Math.max(0, session.timeout - Date.now()),
       },
+      code, // persisted code from sandbox (null if new sandbox)
     });
   } catch (error) {
     console.error("Failed to create/resume session:", error);
@@ -66,13 +75,16 @@ export async function DELETE() {
   const session = getSession();
 
   try {
+    let usage = null;
     if (session?.sandboxName) {
-      await stopSandbox(session.sandboxName);
+      const result = await stopSandbox(session.sandboxName);
+      usage = result.usage;
     }
     clearSession();
 
     return jsonSuccess({
       message: "Sandbox stopped. Your environment is saved and will resume on next session.",
+      usage,
     });
   } catch (error) {
     console.error("Failed to stop session:", error);

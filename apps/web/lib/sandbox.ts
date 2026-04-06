@@ -1,5 +1,10 @@
 import { Sandbox } from "@vercel/sandbox";
 import { createHash } from "crypto";
+import { recordSessionUsage } from "./sandbox-usage-store";
+import type { SandboxSessionUsage } from "./types";
+
+/** Canonical code file path inside the sandbox. Persists across sessions. */
+const CODE_PATH = "/vercel/sandbox/handler.ts";
 
 /**
  * Generate a deterministic sandbox name for a user.
@@ -34,15 +39,42 @@ export async function getSandbox(sandboxName: string): Promise<Sandbox> {
   return Sandbox.get({ name: sandboxName });
 }
 
+export interface StopResult {
+  usage: SandboxSessionUsage | null;
+}
+
 /**
  * Stop a sandbox session. State persists automatically via snapshot.
+ * Uses blocking stop to capture session usage metrics (CPU, memory, network).
  */
-export async function stopSandbox(sandboxName: string): Promise<void> {
+export async function stopSandbox(sandboxName: string): Promise<StopResult> {
   try {
     const sandbox = await Sandbox.get({ name: sandboxName });
-    await sandbox.stop();
+    const session = await sandbox.stop({ blocking: true });
+
+    const usage: SandboxSessionUsage = {
+      sessionId: session.id,
+      sandboxName,
+      stoppedAt: new Date().toISOString(),
+      durationMs: session.duration ?? 0,
+      activeCpuMs: session.activeCpuDurationMs ?? 0,
+      memoryMb: session.memory ?? 0,
+      vcpus: session.vcpus ?? 0,
+      egressBytes: session.networkTransfer?.egress ?? 0,
+      ingressBytes: session.networkTransfer?.ingress ?? 0,
+    };
+
+    // Persist to Redis — failure must not break the stop
+    try {
+      await recordSessionUsage(usage);
+    } catch (err) {
+      console.error("Failed to record sandbox usage:", err);
+    }
+
+    return { usage };
   } catch {
     // Sandbox doesn't exist or already stopped
+    return { usage: null };
   }
 }
 
@@ -59,6 +91,27 @@ export async function deleteSandbox(sandboxName: string): Promise<void> {
 }
 
 /**
+ * Save code to the sandbox filesystem. This is the canonical source —
+ * it persists across sessions via automatic snapshots.
+ */
+export async function saveCode(sandboxName: string, code: string): Promise<void> {
+  const sandbox = await Sandbox.get({ name: sandboxName });
+  await sandbox.writeFiles([
+    { path: CODE_PATH, content: Buffer.from(code, "utf-8") },
+  ]);
+}
+
+/**
+ * Load code from the sandbox filesystem. Returns null if no code has been saved yet.
+ */
+export async function loadCode(sandboxName: string): Promise<string | null> {
+  const sandbox = await Sandbox.get({ name: sandboxName });
+  const result = await sandbox.runCommand("cat", [CODE_PATH]);
+  if (result.exitCode !== 0) return null;
+  return await result.stdout();
+}
+
+/**
  * Streaming code execution. The beta SDK auto-resumes stopped sandboxes
  * when commands are run, so no manual resume logic is needed.
  */
@@ -68,16 +121,14 @@ export async function* executeCodeStreaming(
 ): AsyncGenerator<{ type: "stdout" | "stderr" | "exit"; data: string }> {
   const sandbox = await Sandbox.get({ name: sandboxName });
 
+  // Write code to the canonical path (persists in sandbox filesystem)
   await sandbox.writeFiles([
-    {
-      path: "/vercel/sandbox/script.ts",
-      content: Buffer.from(code, "utf-8"),
-    },
+    { path: CODE_PATH, content: Buffer.from(code, "utf-8") },
   ]);
 
   const command = await sandbox.runCommand({
     cmd: "node",
-    args: ["--experimental-strip-types", "/vercel/sandbox/script.ts"],
+    args: ["--experimental-strip-types", CODE_PATH],
     detached: true,
   });
 
@@ -134,16 +185,14 @@ export async function* buildCode(
 ): AsyncGenerator<{ type: "log" | "error" | "done"; data: string }> {
   const sandbox = await Sandbox.get({ name: sandboxName });
 
-  await sandbox.runCommand("mkdir", ["-p", "/tmp/src", "/tmp/dist"]);
+  await sandbox.runCommand("mkdir", ["-p", "/tmp/dist"]);
 
+  // Write code to the canonical path (persists in sandbox filesystem)
   await sandbox.writeFiles([
-    {
-      path: "/tmp/src/handler.ts",
-      content: Buffer.from(code, "utf-8"),
-    },
+    { path: CODE_PATH, content: Buffer.from(code, "utf-8") },
   ]);
 
-  yield { type: "log", data: "Source code written to /tmp/src/handler.ts" };
+  yield { type: "log", data: `Source code saved to ${CODE_PATH}` };
 
   yield { type: "log", data: "Checking Bun installation..." };
   const installResult = await installBun(sandboxName);
@@ -161,7 +210,7 @@ export async function* buildCode(
     cmd: "sh",
     args: [
       "-c",
-      'export PATH="$HOME/.bun/bin:$PATH" && bun build /tmp/src/handler.ts --outfile=/tmp/dist/index.js --target=bun',
+      `export PATH="$HOME/.bun/bin:$PATH" && bun build ${CODE_PATH} --outfile=/tmp/dist/index.js --target=bun`,
     ],
     detached: true,
   });

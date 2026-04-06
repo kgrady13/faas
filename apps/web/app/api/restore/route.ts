@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { getSession, setSession } from "@/lib/session-store";
-import { getOrCreateSandbox } from "@/lib/sandbox";
+import { getOrCreateSandbox, loadCode } from "@/lib/sandbox";
 import { jsonSuccess, jsonError } from "@/lib/api-response";
 
 // With persistent sandboxes, "restore" is just resuming the sandbox.
@@ -16,6 +16,14 @@ export async function POST(request: NextRequest) {
     // Get the persistent sandbox — auto-resumes from last state
     await getOrCreateSandbox(session.sandboxName);
 
+    // Load persisted code from the sandbox filesystem
+    let code: string | null = null;
+    try {
+      code = await loadCode(session.sandboxName);
+    } catch {
+      // File doesn't exist yet
+    }
+
     const updated = {
       sandboxName: session.sandboxName,
       status: "running" as const,
@@ -30,6 +38,7 @@ export async function POST(request: NextRequest) {
         ...updated,
         remainingTime: Math.max(0, updated.timeout - Date.now()),
       },
+      code,
       message: "Sandbox resumed from saved state.",
     });
   } catch (error) {

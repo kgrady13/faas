@@ -1,15 +1,16 @@
 import { NextRequest } from "next/server";
 import { getUserId, getUserProject } from "@/lib/deployments-store";
 import { getUserUsage } from "@/lib/vercel-deploy";
+import { generateSandboxName } from "@/lib/sandbox";
+import {
+  getSandboxUsageTotals,
+  getRecentSessions,
+  calculateSandboxCost,
+} from "@/lib/sandbox-usage-store";
 import { jsonResponse, errorResponse } from "@/lib/api-response";
 
 export async function GET(request: NextRequest) {
   const userId = getUserId(request);
-
-  const userProject = await getUserProject(userId);
-  if (!userProject) {
-    return jsonResponse({ usage: null, message: "No project found. Deploy a function first." });
-  }
 
   // Default to current calendar month
   const searchParams = request.nextUrl.searchParams;
@@ -21,8 +22,47 @@ export async function GET(request: NextRequest) {
   const to = searchParams.get("to") || defaultTo;
 
   try {
-    const usage = await getUserUsage(userProject.vercelProjectId, from, to);
-    usage.projectName = userProject.projectName;
+    // Fetch deployment usage (requires a per-user project)
+    const userProject = await getUserProject(userId);
+    let usage = null;
+
+    if (userProject) {
+      usage = await getUserUsage(userProject.vercelProjectId, from, to);
+      usage.projectName = userProject.projectName;
+    }
+
+    // Fetch sandbox usage (independent of deployment project)
+    const sandboxName = generateSandboxName(userId);
+    const totals = await getSandboxUsageTotals(sandboxName);
+
+    if (totals) {
+      const estimatedCost = calculateSandboxCost(totals);
+      const recentSessions = await getRecentSessions(sandboxName, 5);
+
+      const sandboxUsage = { totals, estimatedCost, recentSessions };
+
+      if (usage) {
+        usage.sandboxUsage = sandboxUsage;
+      } else {
+        // No deployment project yet, but sandbox usage exists
+        return jsonResponse({
+          usage: {
+            totalBilledCost: 0,
+            totalEffectiveCost: 0,
+            charges: [],
+            periodStart: from,
+            periodEnd: to,
+            projectId: "",
+            projectName: "",
+            sandboxUsage,
+          },
+        });
+      }
+    }
+
+    if (!usage) {
+      return jsonResponse({ usage: null, message: "No usage data yet. Start a session or deploy a function." });
+    }
 
     return jsonResponse({ usage });
   } catch (error) {

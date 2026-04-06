@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import type { SessionStatus } from "@/lib/types";
+import type { SessionStatus, SandboxSessionUsage } from "@/lib/types";
 
 export interface SessionState {
   sandboxName: string;
@@ -18,10 +18,10 @@ export interface UseSessionReturn {
   remainingTime: number;
   loading: SessionLoadingState;
   fetchSession: () => Promise<void>;
-  createSession: () => Promise<{ success: boolean; error?: string }>;
-  stopSandbox: () => Promise<{ success: boolean; error?: string }>;
-  pauseSandbox: () => Promise<{ success: boolean; error?: string }>;
-  resumeSandbox: () => Promise<{ success: boolean; error?: string }>;
+  createSession: () => Promise<{ success: boolean; error?: string; code?: string | null }>;
+  stopSandbox: () => Promise<{ success: boolean; error?: string; usage?: SandboxSessionUsage }>;
+  pauseSandbox: () => Promise<{ success: boolean; error?: string; usage?: SandboxSessionUsage }>;
+  resumeSandbox: () => Promise<{ success: boolean; error?: string; code?: string | null }>;
   setSession: React.Dispatch<React.SetStateAction<SessionState | null>>;
 }
 
@@ -45,7 +45,7 @@ export function useSession(): UseSessionReturn {
     }
   }, []);
 
-  const createSession = useCallback(async (): Promise<{ success: boolean; error?: string }> => {
+  const createSession = useCallback(async (): Promise<{ success: boolean; error?: string; code?: string | null }> => {
     setLoading("create");
 
     try {
@@ -55,7 +55,7 @@ export function useSession(): UseSessionReturn {
       if (data.success) {
         setSession(data.session);
         setRemainingTime(data.session.remainingTime);
-        return { success: true };
+        return { success: true, code: data.code ?? null };
       } else {
         return { success: false, error: data.error };
       }
@@ -66,7 +66,7 @@ export function useSession(): UseSessionReturn {
     }
   }, []);
 
-  const stopSandbox = useCallback(async (): Promise<{ success: boolean; error?: string }> => {
+  const stopSandbox = useCallback(async (): Promise<{ success: boolean; error?: string; usage?: SandboxSessionUsage }> => {
     if (!session) {
       return { success: false, error: "No active session to stop." };
     }
@@ -80,7 +80,7 @@ export function useSession(): UseSessionReturn {
       if (data.success) {
         setSession(null);
         setRemainingTime(0);
-        return { success: true };
+        return { success: true, usage: data.usage ?? undefined };
       } else {
         return { success: false, error: data.error };
       }
@@ -91,7 +91,7 @@ export function useSession(): UseSessionReturn {
     }
   }, [session]);
 
-  const pauseSandbox = useCallback(async (): Promise<{ success: boolean; error?: string }> => {
+  const pauseSandbox = useCallback(async (): Promise<{ success: boolean; error?: string; usage?: SandboxSessionUsage }> => {
     if (!session || session.status !== "running") {
       return { success: false, error: "No active session to pause." };
     }
@@ -104,7 +104,7 @@ export function useSession(): UseSessionReturn {
 
       if (data.success) {
         setSession((s) => (s ? { ...s, status: "paused" } : null));
-        return { success: true };
+        return { success: true, usage: data.usage ?? undefined };
       } else {
         return { success: false, error: data.error };
       }
@@ -115,7 +115,7 @@ export function useSession(): UseSessionReturn {
     }
   }, [session]);
 
-  const resumeSandbox = useCallback(async (): Promise<{ success: boolean; error?: string }> => {
+  const resumeSandbox = useCallback(async (): Promise<{ success: boolean; error?: string; code?: string | null }> => {
     if (!session) {
       return { success: false, error: "No session to resume." };
     }
@@ -129,7 +129,7 @@ export function useSession(): UseSessionReturn {
       if (data.success) {
         setSession(data.session);
         setRemainingTime(data.session.remainingTime);
-        return { success: true };
+        return { success: true, code: data.code ?? null };
       } else {
         return { success: false, error: data.error };
       }

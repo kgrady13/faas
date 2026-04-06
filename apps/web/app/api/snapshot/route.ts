@@ -12,12 +12,12 @@ export async function POST() {
       return jsonError("No active session", 400);
     }
 
-    await stopSandbox(session.sandboxName);
-
+    const { usage } = await stopSandbox(session.sandboxName);
     updateSession({ status: "paused" });
 
     return jsonSuccess({
       message: "Sandbox paused. State saved automatically. Use Resume to continue.",
+      usage,
     });
   } catch (error) {
     console.error("Failed to pause sandbox:", error);

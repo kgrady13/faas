@@ -10,12 +10,13 @@ export async function POST() {
       return jsonError("No active session", 400);
     }
 
-    // Stop the sandbox VM — state persists automatically
-    await stopSandbox(session.sandboxName);
+    // Stop the sandbox VM — state persists automatically, usage metrics captured
+    const { usage } = await stopSandbox(session.sandboxName);
     clearSession();
 
     return jsonSuccess({
       message: "Sandbox stopped. Your environment is saved and will resume on next session.",
+      usage,
     });
   } catch (error) {
     console.error("Failed to stop sandbox:", error);

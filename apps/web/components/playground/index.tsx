@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useMemo } from "react";
 import {
   useSession,
   useCodeExecution,
@@ -68,11 +68,16 @@ export default function Playground() {
 
     const result = await createSession();
     if (result.success) {
-      addOutput("system", "Sandbox ready (persistent environment)");
+      if (result.code) {
+        setCode(result.code);
+        addOutput("system", "Sandbox ready — code restored from saved state");
+      } else {
+        addOutput("system", "Sandbox ready (persistent environment)");
+      }
     } else {
       addOutput("stderr", `Error: ${result.error}`);
     }
-  }, [createSession, addOutput, clearOutputs]);
+  }, [createSession, addOutput, clearOutputs, setCode]);
 
   const handleRunCode = useCallback(async () => {
     if (!session || session.status !== "running") {
@@ -132,6 +137,11 @@ export default function Playground() {
     const result = await pauseSandbox();
     if (result.success) {
       addOutput("system", "Sandbox paused. State saved automatically.");
+      if (result.usage) {
+        const cpuSec = (result.usage.activeCpuMs / 1000).toFixed(1);
+        const transferMb = ((result.usage.egressBytes + result.usage.ingressBytes) / 1_048_576).toFixed(1);
+        addOutput("system", `Session used ${cpuSec}s CPU, ${transferMb} MB transfer`);
+      }
     } else {
       addOutput("stderr", `Error: ${result.error}`);
     }
@@ -141,17 +151,27 @@ export default function Playground() {
     addOutput("system", "Resuming sandbox...");
     const result = await resumeSandbox();
     if (result.success) {
-      addOutput("system", "Sandbox resumed from saved state!");
+      if (result.code) {
+        setCode(result.code);
+        addOutput("system", "Sandbox resumed — code restored");
+      } else {
+        addOutput("system", "Sandbox resumed from saved state!");
+      }
     } else {
       addOutput("stderr", `Error: ${result.error}`);
     }
-  }, [resumeSandbox, addOutput]);
+  }, [resumeSandbox, addOutput, setCode]);
 
   const handleStop = useCallback(async () => {
     addOutput("system", "Stopping sandbox...");
     const result = await stopSandbox();
     if (result.success) {
-      addOutput("system", "Sandbox stopped. Session cleared.");
+      addOutput("system", "Sandbox stopped. Environment saved.");
+      if (result.usage) {
+        const cpuSec = (result.usage.activeCpuMs / 1000).toFixed(1);
+        const transferMb = ((result.usage.egressBytes + result.usage.ingressBytes) / 1_048_576).toFixed(1);
+        addOutput("system", `Session used ${cpuSec}s CPU, ${transferMb} MB transfer`);
+      }
     } else {
       addOutput("stderr", `Error: ${result.error}`);
     }
@@ -203,6 +223,34 @@ export default function Playground() {
       addOutput("stderr", "Failed to format code - check for syntax errors");
     }
   }, [code, addOutput, setCode]);
+
+  // Debounced auto-save: write editor code to sandbox filesystem
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastSavedCode = useRef<string>("");
+
+  useEffect(() => {
+    if (!session || session.status !== "running") return;
+    if (code === lastSavedCode.current) return;
+
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+
+    saveTimerRef.current = setTimeout(async () => {
+      try {
+        await fetch("/api/save", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ code }),
+        });
+        lastSavedCode.current = code;
+      } catch {
+        // Silent fail — save is best-effort
+      }
+    }, 2000);
+
+    return () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    };
+  }, [code, session]);
 
   // Keyboard shortcuts
   useKeyboardShortcuts(

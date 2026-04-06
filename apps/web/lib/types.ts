@@ -61,6 +61,44 @@ export interface UsageSummary {
   periodEnd: string;
   projectId: string;
   projectName: string;
+  sandboxUsage?: SandboxUsageSummary;
+}
+
+// Sandbox usage types — per-session metrics captured on stop
+
+export interface SandboxSessionUsage {
+  sessionId: string;
+  sandboxName: string;
+  stoppedAt: string; // ISO string
+  durationMs: number; // wall-clock duration
+  activeCpuMs: number; // active CPU time (excludes I/O wait)
+  memoryMb: number; // memory allocated
+  vcpus: number; // vCPUs allocated
+  egressBytes: number;
+  ingressBytes: number;
+}
+
+export interface SandboxUsageTotals {
+  totalDurationMs: number;
+  totalActiveCpuMs: number;
+  totalEgressBytes: number;
+  totalIngressBytes: number;
+  totalSessions: number;
+  memoryMb: number; // last known allocation
+  vcpus: number; // last known allocation
+}
+
+export interface SandboxUsageCost {
+  activeCpuCost: number; // $0.128/hr
+  memoryCost: number; // $0.0212/GB-hr
+  dataTransferCost: number; // $0.15/GB
+  totalCost: number;
+}
+
+export interface SandboxUsageSummary {
+  totals: SandboxUsageTotals;
+  estimatedCost: SandboxUsageCost;
+  recentSessions: SandboxSessionUsage[];
 }
 
 export interface DeploymentWithFunctionUrl extends Deployment {
