@@ -204,22 +204,12 @@ export function PlaygroundHeader({
                   </div>
                 )}
 
-                {/* Sandbox ID */}
-                {session?.sandboxId && (
+                {/* Sandbox Name */}
+                {session?.sandboxName && (
                   <div className="flex items-center justify-between">
-                    <span className="text-xs text-muted-foreground">Sandbox ID</span>
+                    <span className="text-xs text-muted-foreground">Sandbox</span>
                     <span className="text-xs font-mono text-muted-foreground">
-                      {session.sandboxId.slice(0, 12)}...
-                    </span>
-                  </div>
-                )}
-
-                {/* Snapshot ID */}
-                {session?.snapshotId && (
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-muted-foreground">Snapshot ID</span>
-                    <span className="text-xs font-mono text-muted-foreground">
-                      {session.snapshotId.slice(0, 12)}...
+                      {session.sandboxName}
                     </span>
                   </div>
                 )}
@@ -236,7 +226,7 @@ export function PlaygroundHeader({
                       disabled={loading !== null}
                       className="flex-1 h-8 text-xs"
                     >
-                      {loading === "snapshot" ? "Pausing..." : "Pause"}
+                      {loading === "stop" ? "Pausing..." : "Pause"}
                     </Button>
                     <Button
                       variant="outline"
@@ -259,7 +249,7 @@ export function PlaygroundHeader({
                       disabled={loading !== null}
                       className="flex-1 h-8 text-xs"
                     >
-                      {loading === "restore" ? "Resuming..." : "Resume"}
+                      {loading === "create" ? "Resuming..." : "Resume"}
                     </Button>
                     <Button
                       variant="outline"

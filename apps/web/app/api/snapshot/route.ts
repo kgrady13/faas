@@ -1,32 +1,28 @@
 import { getSession, updateSession } from "@/lib/session-store";
-import { createSnapshot } from "@/lib/sandbox";
+import { stopSandbox } from "@/lib/sandbox";
 import { jsonSuccess, jsonError } from "@/lib/api-response";
 
+// With persistent sandboxes, "snapshot" is just stopping the sandbox.
+// State is automatically saved on stop and restored on resume.
 export async function POST() {
   try {
     const session = getSession();
 
-    if (!session || !session.sandboxId) {
+    if (!session || !session.sandboxName) {
       return jsonError("No active session", 400);
     }
 
-    // Create snapshot (this stops the sandbox) - reconnects if needed
-    const snapshotId = await createSnapshot(session.sandboxId);
+    await stopSandbox(session.sandboxName);
 
-    // Update session with snapshot info
-    updateSession({
-      snapshotId,
-      status: "paused",
-    });
+    updateSession({ status: "paused" });
 
     return jsonSuccess({
-      snapshotId,
-      message: "Snapshot created. Sandbox has been stopped. Use Restore to resume.",
+      message: "Sandbox paused. State saved automatically. Use Resume to continue.",
     });
   } catch (error) {
-    console.error("Failed to create snapshot:", error);
+    console.error("Failed to pause sandbox:", error);
     return jsonError(
-      error instanceof Error ? error.message : "Failed to create snapshot",
+      error instanceof Error ? error.message : "Failed to pause sandbox",
       500
     );
   }

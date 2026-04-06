@@ -1,47 +1,41 @@
 import { NextRequest } from "next/server";
 import { getSession, setSession } from "@/lib/session-store";
-import { createSandbox } from "@/lib/sandbox";
+import { getOrCreateSandbox } from "@/lib/sandbox";
 import { jsonSuccess, jsonError } from "@/lib/api-response";
 
+// With persistent sandboxes, "restore" is just resuming the sandbox.
+// The SDK auto-resumes from the last snapshot.
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json().catch(() => ({}));
-    let snapshotId = body.snapshotId;
+    const session = getSession();
 
-    // If no snapshotId provided, try to get from current session
-    if (!snapshotId) {
-      const session = getSession();
-      snapshotId = session?.snapshotId;
+    if (!session?.sandboxName) {
+      return jsonError("No session to restore", 400);
     }
 
-    if (!snapshotId) {
-      return jsonError("No snapshot available to restore", 400);
-    }
+    // Get the persistent sandbox — auto-resumes from last state
+    await getOrCreateSandbox(session.sandboxName);
 
-    // Create sandbox from snapshot
-    const sandbox = await createSandbox(snapshotId);
-
-    const session = {
-      sandboxId: sandbox.sandboxId,
+    const updated = {
+      sandboxName: session.sandboxName,
       status: "running" as const,
-      timeout: Date.now() + 5 * 60 * 1000,
-      snapshotId,
-      createdAt: new Date(),
+      timeout: Date.now() + 30 * 60 * 1000,
+      createdAt: session.createdAt,
     };
 
-    setSession(session);
+    setSession(updated);
 
     return jsonSuccess({
       session: {
-        ...session,
-        remainingTime: Math.max(0, session.timeout - Date.now()),
+        ...updated,
+        remainingTime: Math.max(0, updated.timeout - Date.now()),
       },
-      message: "Sandbox restored from snapshot",
+      message: "Sandbox resumed from saved state.",
     });
   } catch (error) {
-    console.error("Failed to restore snapshot:", error);
+    console.error("Failed to restore sandbox:", error);
     return jsonError(
-      error instanceof Error ? error.message : "Failed to restore snapshot",
+      error instanceof Error ? error.message : "Failed to restore sandbox",
       500
     );
   }

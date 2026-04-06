@@ -1,28 +1,28 @@
-import { NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { getSession, setSession, clearSession } from "@/lib/session-store";
-import { createSandbox, stopSandbox } from "@/lib/sandbox";
+import { getOrCreateSandbox, stopSandbox, generateSandboxName } from "@/lib/sandbox";
+import { getUserId } from "@/lib/deployments-store";
 import { jsonSuccess, jsonError } from "@/lib/api-response";
 
-// POST /api/session - Create new session
-export async function POST() {
+// POST /api/session - Create or resume a persistent sandbox
+export async function POST(request: NextRequest) {
   try {
-    // Stop any existing sandbox first
+    const userId = getUserId(request);
+    const sandboxName = generateSandboxName(userId);
+
+    // Stop tracking any previous session in local state
     const existingSession = getSession();
-    if (existingSession?.sandboxId) {
-      try {
-        await stopSandbox(existingSession.sandboxId);
-      } catch {
-        // Ignore errors stopping old sandbox
-      }
+    if (existingSession && existingSession.sandboxName !== sandboxName) {
+      clearSession();
     }
 
-    // Create new sandbox
-    const sandbox = await createSandbox();
+    // Get existing sandbox or create a new one (persistent by default)
+    const sandbox = await getOrCreateSandbox(sandboxName);
 
     const session = {
-      sandboxId: sandbox.sandboxId,
+      sandboxName,
       status: "running" as const,
-      timeout: Date.now() + 5 * 60 * 1000, // 5 minutes default
+      timeout: Date.now() + 30 * 60 * 1000, // 30 minutes (VM auto-stops, state persists)
       createdAt: new Date(),
     };
 
@@ -35,7 +35,7 @@ export async function POST() {
       },
     });
   } catch (error) {
-    console.error("Failed to create session:", error);
+    console.error("Failed to create/resume session:", error);
     return jsonError("Failed to create sandbox", 500);
   }
 }
@@ -45,39 +45,38 @@ export async function GET() {
   const session = getSession();
 
   if (!session) {
-    return NextResponse.json({ session: null });
+    return jsonSuccess({ session: null });
   }
 
   const isExpired = Date.now() > session.timeout;
 
-  // Update status if expired
-  if (isExpired && session.status === "running") {
-    session.status = "stopped";
-  }
-
-  return NextResponse.json({
+  return jsonSuccess({
     session: {
       ...session,
       remainingTime: Math.max(0, session.timeout - Date.now()),
-      isActive: session.status === "running" && !isExpired,
+      // With persistent sandboxes, "expired" just means the VM auto-stopped.
+      // State is preserved and will auto-resume on next command.
+      isActive: !isExpired,
     },
   });
 }
 
-// DELETE /api/session - Stop session
+// DELETE /api/session - Stop sandbox (state persists automatically)
 export async function DELETE() {
   const session = getSession();
 
   try {
-    if (session?.sandboxId) {
-      await stopSandbox(session.sandboxId);
+    if (session?.sandboxName) {
+      await stopSandbox(session.sandboxName);
     }
     clearSession();
 
-    return jsonSuccess({});
+    return jsonSuccess({
+      message: "Sandbox stopped. Your environment is saved and will resume on next session.",
+    });
   } catch (error) {
     console.error("Failed to stop session:", error);
     clearSession();
-    return jsonSuccess({}); // Still clear session even if stop fails
+    return jsonSuccess({});
   }
 }

@@ -6,18 +6,16 @@ export async function POST() {
   try {
     const session = getSession();
 
-    if (!session || !session.sandboxId) {
+    if (!session || !session.sandboxName) {
       return jsonError("No active session", 400);
     }
 
-    // Stop the sandbox (no snapshot created)
-    await stopSandbox(session.sandboxId);
-
-    // Clear the session completely
+    // Stop the sandbox VM — state persists automatically
+    await stopSandbox(session.sandboxName);
     clearSession();
 
     return jsonSuccess({
-      message: "Sandbox stopped and session cleared.",
+      message: "Sandbox stopped. Your environment is saved and will resume on next session.",
     });
   } catch (error) {
     console.error("Failed to stop sandbox:", error);

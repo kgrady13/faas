@@ -1,5 +1,4 @@
 import { NextRequest } from "next/server";
-import { updateSession } from "@/lib/session-store";
 import { executeCodeStreaming } from "@/lib/sandbox";
 import { sseError, sseResponse } from "@/lib/api-response";
 import { validateActiveSession } from "@/lib/session-validation";
@@ -16,26 +15,18 @@ export async function POST(request: NextRequest) {
     return validation.error;
   }
 
-  const { sandboxId } = validation;
+  const { sandboxName } = validation;
 
-  // Create a readable stream for SSE
   const stream = new ReadableStream({
     async start(controller) {
       const encoder = new TextEncoder();
 
       try {
-        // Stream logs from the sandbox (reconnects if needed)
-        for await (const event of executeCodeStreaming(code, sandboxId)) {
+        for await (const event of executeCodeStreaming(code, sandboxName)) {
           const sseMessage = `data: ${JSON.stringify(event)}\n\n`;
           controller.enqueue(encoder.encode(sseMessage));
         }
 
-        // Extend timeout by 2 minutes on successful execution
-        updateSession({
-          timeout: Date.now() + 2 * 60 * 1000,
-        });
-
-        // Send done event
         controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "done" })}\n\n`));
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : "Execution failed";

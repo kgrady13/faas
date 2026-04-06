@@ -26,8 +26,8 @@ export default function Playground() {
     fetchSession,
     createSession,
     stopSandbox,
-    saveSnapshot,
-    restoreSnapshot,
+    pauseSandbox,
+    resumeSandbox,
     setSession,
   } = useSession();
 
@@ -64,11 +64,11 @@ export default function Playground() {
   // Action handlers
   const handleCreateSession = useCallback(async () => {
     clearOutputs();
-    addOutput("system", "Creating new sandbox...");
+    addOutput("system", "Starting sandbox...");
 
     const result = await createSession();
     if (result.success) {
-      addOutput("system", "Sandbox created");
+      addOutput("system", "Sandbox ready (persistent environment)");
     } else {
       addOutput("stderr", `Error: ${result.error}`);
     }
@@ -120,35 +120,32 @@ export default function Playground() {
           addOutput("system", `Function URL: ${data.functionUrl}`);
           fetchDeployments();
         },
-        onSnapshot: (data) => {
-          setSession((s) =>
-            s ? { ...s, status: "paused", snapshotId: data.id } : null
-          );
+        onSnapshot: () => {
+          // With persistent sandboxes, state auto-saves — no action needed
         },
       }
     );
   }, [session, code, cronSchedule, regions, deployCode, addOutput, fetchDeployments, setSession]);
 
   const handlePause = useCallback(async () => {
-    addOutput("system", "Creating snapshot...");
-    const result = await saveSnapshot();
+    addOutput("system", "Pausing sandbox...");
+    const result = await pauseSandbox();
     if (result.success) {
-      addOutput("system", `Snapshot saved: ${result.snapshotId}`);
-      addOutput("system", "Session paused. Click 'Resume' to continue.");
+      addOutput("system", "Sandbox paused. State saved automatically.");
     } else {
       addOutput("stderr", `Error: ${result.error}`);
     }
-  }, [saveSnapshot, addOutput]);
+  }, [pauseSandbox, addOutput]);
 
   const handleResume = useCallback(async () => {
-    addOutput("system", "Restoring from snapshot...");
-    const result = await restoreSnapshot();
+    addOutput("system", "Resuming sandbox...");
+    const result = await resumeSandbox();
     if (result.success) {
-      addOutput("system", "Sandbox restored successfully!");
+      addOutput("system", "Sandbox resumed from saved state!");
     } else {
       addOutput("stderr", `Error: ${result.error}`);
     }
-  }, [restoreSnapshot, addOutput]);
+  }, [resumeSandbox, addOutput]);
 
   const handleStop = useCallback(async () => {
     addOutput("system", "Stopping sandbox...");

@@ -5,7 +5,7 @@ import type { Session } from "./types";
 export interface SessionValidationSuccess {
   valid: true;
   session: Session;
-  sandboxId: string;
+  sandboxName: string;
 }
 
 export interface SessionValidationFailure {
@@ -16,40 +16,23 @@ export interface SessionValidationFailure {
 export type SessionValidationResult = SessionValidationSuccess | SessionValidationFailure;
 
 /**
- * Validates that there is an active session that can execute code.
- * Checks: session exists, not expired, not paused.
- *
- * @returns SessionValidationResult with either the valid session or an error Response
+ * Validates that there is a session with a sandbox name.
+ * With persistent sandboxes, the SDK auto-resumes stopped VMs on command,
+ * so we only need to verify a sandbox name exists.
  */
 export function validateActiveSession(): SessionValidationResult {
   const session = getSession();
 
-  if (!session || !session.sandboxId) {
+  if (!session || !session.sandboxName) {
     return {
       valid: false,
       error: sseError("No active session. Please create a new session.", 400),
     };
   }
 
-  // Check if session has expired
-  if (Date.now() > session.timeout) {
-    return {
-      valid: false,
-      error: sseError("Session has expired. Please create a new session.", 400),
-    };
-  }
-
-  // Check if session is paused
-  if (session.status === "paused") {
-    return {
-      valid: false,
-      error: sseError("Session is paused. Click 'Resume' to continue.", 400),
-    };
-  }
-
   return {
     valid: true,
     session,
-    sandboxId: session.sandboxId,
+    sandboxName: session.sandboxName,
   };
 }

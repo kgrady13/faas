@@ -6,10 +6,9 @@
 export type SessionStatus = "pending" | "running" | "stopping" | "stopped" | "paused" | "failed";
 
 export interface Session {
-  sandboxId: string;
+  sandboxName: string;
   status: SessionStatus;
   timeout: number;
-  snapshotId?: string;
   createdAt: Date;
 }
 

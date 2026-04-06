@@ -1,8 +1,8 @@
 import { NextRequest } from "next/server";
-import { updateSession } from "@/lib/session-store";
-import { buildCode, createSnapshot } from "@/lib/sandbox";
+import { buildCode, getSandbox } from "@/lib/sandbox";
 import { generateBuildOutput, createDeployment, ensureUserProject } from "@/lib/vercel-deploy";
-import { addDeployment, getUserId, type Deployment } from "@/lib/deployments-store";
+import { addDeployment, getUserId } from "@/lib/deployments-store";
+import type { Deployment } from "@/lib/types";
 import { sseError, sseResponse } from "@/lib/api-response";
 import { validateActiveSession } from "@/lib/session-validation";
 
@@ -20,9 +20,8 @@ export async function POST(request: NextRequest) {
     return validation.error;
   }
 
-  const { sandboxId } = validation;
+  const { sandboxName } = validation;
 
-  // Create a readable stream for SSE
   const stream = new ReadableStream({
     async start(controller) {
       const encoder = new TextEncoder();
@@ -51,7 +50,7 @@ export async function POST(request: NextRequest) {
 
         let buildSucceeded = false;
 
-        for await (const event of buildCode(code, sandboxId)) {
+        for await (const event of buildCode(code, sandboxName)) {
           if (event.type === "log") {
             emit("log", event.data);
           } else if (event.type === "error") {
@@ -67,9 +66,8 @@ export async function POST(request: NextRequest) {
           return;
         }
 
-        // Read the bundled code
-        const { getOrReconnectSandbox } = await import("@/lib/sandbox");
-        const sandbox = await getOrReconnectSandbox(sandboxId);
+        // Read the bundled code from sandbox
+        const sandbox = await getSandbox(sandboxName);
         const result = await sandbox.runCommand("cat", ["/tmp/dist/index.js"]);
         if (result.exitCode !== 0) {
           emit("error", "Failed to read bundled code");
@@ -81,10 +79,8 @@ export async function POST(request: NextRequest) {
         emit("phase", "deploy");
         emit("log", "Creating Vercel deployment...");
 
-        // Generate Build Output API files
         const files = generateBuildOutput(bundledCode, functionName, cronSchedule);
 
-        // Create deployment on Vercel (SDK handles file uploads)
         const deploymentResult = await createDeployment({
           files,
           functionName,
@@ -93,7 +89,6 @@ export async function POST(request: NextRequest) {
           projectId: userProject.vercelProjectId,
         });
 
-        // Store deployment in our local store
         const deployment: Deployment = {
           id: deploymentResult.id,
           url: deploymentResult.url,
@@ -120,24 +115,7 @@ export async function POST(request: NextRequest) {
           functionUrl: `${deployment.url}/api/${functionName}`,
         });
 
-        // Create snapshot to pause the sandbox after deployment
-        try {
-          const snapshotId = await createSnapshot(sandboxId);
-          updateSession({
-            snapshotId,
-            status: "paused",
-          });
-          emit("snapshot", { id: snapshotId });
-          emit("log", `Sandbox paused. Snapshot: ${snapshotId}`);
-        } catch (snapshotError) {
-          console.error("Failed to create snapshot after deployment:", snapshotError);
-          emit("log", "Warning: Failed to create snapshot after deployment");
-        }
-
-        // Extend timeout on successful deploy
-        updateSession({
-          timeout: Date.now() + 2 * 60 * 1000,
-        });
+        // No manual snapshot needed — persistent sandboxes auto-save on stop
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : "Deployment failed";
         emit("error", errorMessage);
